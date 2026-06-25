@@ -540,13 +540,15 @@ let pollTimer = null;
 // 起動
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
-  gasUrl = localStorage.getItem('gasUrl') || '';
-  const saved = localStorage.getItem('appState_v5');
+  const saved = localStorage.getItem('appState_smart_v1');
   if (saved) {
     try { Object.assign(st, JSON.parse(saved)); } catch(e) {}
   }
-  // deviceNameはlocalStorageから個別管理
-  const dn = localStorage.getItem('deviceName');
+  // gasUrl・deviceName は必ずlocalStorageから個別管理
+  // appState_v5のObject.assignで上書きされないよう、必ず後から読み直す
+  gasUrl = localStorage.getItem('gasUrl_smart') || '';
+  st.gasUrl = gasUrl;
+  const dn = localStorage.getItem('deviceName_smart');
   if (dn) st.deviceName = dn;
 
   document.getElementById('gas-url-input').value = gasUrl;
@@ -2230,7 +2232,7 @@ function importCsv(input) {
 function saveDeviceName() {
   const val = document.getElementById('device-name-input').value.trim();
   st.deviceName = val;
-  localStorage.setItem('deviceName', val);
+  localStorage.setItem('deviceName_smart', val);
   saveLocal();
   alert(val ? `端末名「${val}」を保存しました` : '端末名をクリアしました');
   renderPersonal();
@@ -2238,7 +2240,7 @@ function saveDeviceName() {
 
 function saveGasUrl() {
   gasUrl = document.getElementById('gas-url-input').value.trim();
-  localStorage.setItem('gasUrl', gasUrl);
+  localStorage.setItem('gasUrl_smart', gasUrl);
   st.gasUrl = gasUrl;
   showSyncStatus('💾 GAS URLを保存しました', true);
   if (gasUrl) pullFromCloud();
@@ -2270,6 +2272,8 @@ function showSyncStatus(msg, ok) {
 // ============================================================
 function saveLocal() {
   try {
+    // gasUrl・deviceNameはappState_v5に含めず個別キーで管理
+    // （複数アプリ間でappState_v5が共有されてもURLが混入しないよう）
     const toSave = {
       deviceName: st.deviceName,
       itemMaster: st.itemMaster,
@@ -2278,8 +2282,9 @@ function saveLocal() {
       baseShift: st.baseShift,
       weeklyAttend: st.weeklyAttend
     };
-    localStorage.setItem('appState_v5', JSON.stringify(toSave));
-    localStorage.setItem('deviceName', st.deviceName);
+    localStorage.setItem('appState_smart_v1', JSON.stringify(toSave));
+    localStorage.setItem('deviceName_smart', st.deviceName);
+    localStorage.setItem('gasUrl_smart', gasUrl); // gasUrlは個別キーで保存
   } catch(e) { console.error('saveLocal error:', e); }
 }
 
