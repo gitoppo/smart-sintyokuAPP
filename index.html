@@ -209,6 +209,17 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 <div id="panel-progress" class="panel active">
   <div id="alert-bar" class="alert-gray">---</div>
   <div id="progress-list"></div>
+  <!-- ボトムシートオーバーレイ -->
+  <div id="p1-overlay" class="p2-sheet-overlay" onclick="closeP1Sheet()"></div>
+  <!-- ボトムシート本体 -->
+  <div id="p1-sheet" class="p2-sheet">
+    <div class="p2-sheet-handle"></div>
+    <div class="p2-sheet-header">
+      <div id="p1-sheet-title" class="p2-sheet-title"></div>
+      <div class="p2-sheet-close" onclick="closeP1Sheet()">✕</div>
+    </div>
+    <div id="p1-sheet-body"></div>
+  </div>
 </div>
 
 <!-- ②個人進捗パネル -->
@@ -316,6 +327,17 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
     </button>
   </div>
   <div id="plan-list"></div>
+  <!-- ボトムシートオーバーレイ -->
+  <div id="p3-overlay" class="p2-sheet-overlay" onclick="closeP3Sheet()"></div>
+  <!-- ボトムシート本体 -->
+  <div id="p3-sheet" class="p2-sheet">
+    <div class="p2-sheet-handle"></div>
+    <div class="p2-sheet-header">
+      <div id="p3-sheet-title" class="p2-sheet-title"></div>
+      <div class="p2-sheet-close" onclick="closeP3Sheet()">✕</div>
+    </div>
+    <div id="p3-sheet-body"></div>
+  </div>
 </div>
 
 <!-- ④勤怠パネル -->
@@ -663,13 +685,14 @@ function getDisplayCycle() {
 }
 
 // ============================================================
-// 進捗タブ（①）
+// 進捗タブ（①）新UI：タイル＋ボトムシート
 // ============================================================
+let _p1OpenGroup = null;
+
 function renderProgress() {
   const el = document.getElementById('progress-list');
   if (!el) return;
 
-  // 計画を品目名でグループ化（前工程まとめ表示）
   const groups = buildPreGroups();
   renderAlertBar(groups);
 
@@ -678,7 +701,6 @@ function renderProgress() {
     return;
   }
 
-  // 完了判定: 全planの後工程が100%なら完了グループ
   function isGroupComplete(g) {
     return g.plans.every(p => {
       const prog = st.progress[p.id];
@@ -686,22 +708,87 @@ function renderProgress() {
       return postTotal >= toNum(p.qty) && toNum(p.qty) > 0;
     });
   }
+
   const withPriority    = groups.filter(g => !isGroupComplete(g) && g.plans.some(p=>p.priority));
   const withoutPriority = groups.filter(g => !isGroupComplete(g) && !g.plans.some(p=>p.priority));
   const complete        = groups.filter(g =>  isGroupComplete(g));
-  // 優先あり未完了 → 優先なし未完了 → 完了（グレー）
   const sorted = [...withPriority, ...withoutPriority, ...complete];
 
-  let html = sorted.map((g,idx) => {
-    const done = isGroupComplete(g);
-    const cardStyle = done ? 'opacity:0.45;filter:grayscale(0.5)' : '';
-    const badge = done ? '<span style="padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;background:#1e293b;color:#64748b;flex-shrink:0">✓完了</span>' : '';
-    return renderPreGroupHTML(g, done, cardStyle, badge);
+  el.innerHTML = '<div class="p2-grid" id="p1-tile-grid"></div>';
+  const grid = document.getElementById('p1-tile-grid');
+
+  grid.innerHTML = sorted.map(g => {
+    const isDone      = isGroupComplete(g);
+    const hasPriority = g.plans.some(p => p.priority);
+    const totalQty    = g.plans.reduce((s,p) => s + toNum(p.qty), 0);
+    const totalPost   = g.plans.reduce((s,p) => {
+      const prog = st.progress[p.id];
+      return s + (prog ? calcPostTotal(prog.postDone) : 0);
+    }, 0);
+    const progressCls = totalPost === 0 ? 'p2-tile-progress zero' : 'p2-tile-progress';
+    const tileCls = ['p2-tile', isDone ? 'done' : '', hasPriority ? 'priority' : ''].filter(Boolean).join(' ');
+    return `<div class="${tileCls}" onclick="openP1Sheet('${esc(g.name)}')">
+      <div class="p2-tile-name">${esc(g.name)}${hasPriority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}</div>
+      <div class="p2-tile-qty">予定: ${totalQty}個</div>
+      <div class="${progressCls}">${totalPost}<span style="font-size:14px;font-weight:400;color:var(--muted)"> 個</span></div>
+      <div class="p2-tile-progress-label">${isDone ? '✅ 完了' : '後工程 全端末合計'}</div>
+    </div>`;
   }).join('');
-  if (complete.length > 0) {
-    html += `<div class="f12 text-muted" style="text-align:center;padding:4px 0 8px">── 完了 ${complete.length}件 ──</div>`;
+
+  // ボトムシートが開いていれば内容更新
+  if (_p1OpenGroup) {
+    const g = sorted.find(gg => gg.name === _p1OpenGroup);
+    if (g) renderP1SheetBody(g);
   }
-  el.innerHTML = html;
+}
+
+function renderP1SheetBody(g) {
+  document.getElementById('p1-sheet-title').textContent = g.name;
+  const body = document.getElementById('p1-sheet-body');
+  const totalQty  = g.plans.reduce((s,p) => s + toNum(p.qty), 0);
+  const totalPost = g.plans.reduce((s,p) => {
+    const prog = st.progress[p.id];
+    return s + (prog ? calcPostTotal(prog.postDone) : 0);
+  }, 0);
+
+  body.innerHTML = `
+    <div style="padding:10px 16px 6px;border-bottom:1px solid var(--border);display:flex;gap:16px">
+      <span style="font-size:13px;color:var(--muted)">予定合計: <span style="color:var(--text);font-weight:700">${totalQty}個</span></span>
+      <span style="font-size:13px;color:var(--muted)">後工程合計: <span style="color:var(--g);font-weight:700">${totalPost}個</span></span>
+    </div>
+    ${g.plans.map(p => {
+      const item = st.itemMaster.find(it => it.id === p.itemId);
+      const colorName = dispC(item) || '?';
+      const prog = st.progress[p.id];
+      const postTotal = prog ? calcPostTotal(prog.postDone) : 0;
+      const qty = toNum(p.qty);
+      const isDone = qty > 0 && postTotal >= qty;
+      const valColor = isDone ? 'var(--g)' : postTotal > 0 ? 'var(--b)' : 'var(--muted)';
+      return `<div style="display:flex;align-items:center;padding:14px 16px;border-bottom:1px solid #0d1520;gap:12px">
+        <div style="font-size:17px;font-weight:700;flex:1">${esc(colorName)}</div>
+        <div style="font-size:13px;color:var(--muted)">予定 ${qty}個</div>
+        <div style="font-size:24px;font-weight:700;color:${valColor};min-width:60px;text-align:right">${postTotal}<span style="font-size:13px;font-weight:400;color:var(--muted)">個</span></div>
+        ${isDone ? '<span style="font-size:12px;color:var(--g)">✅</span>' : ''}
+      </div>`;
+    }).join('')}`;
+}
+
+function openP1Sheet(groupName) {
+  const groups = buildPreGroups();
+  const g = groups.find(gg => gg.name === groupName);
+  if (!g) return;
+  _p1OpenGroup = groupName;
+  renderP1SheetBody(g);
+  document.getElementById('p1-overlay').classList.add('open');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.getElementById('p1-sheet').classList.add('open');
+  }));
+}
+
+function closeP1Sheet() {
+  _p1OpenGroup = null;
+  document.getElementById('p1-sheet').classList.remove('open');
+  document.getElementById('p1-overlay').classList.remove('open');
 }
 
 function buildPreGroups() {
@@ -1358,8 +1445,10 @@ function downloadPlanCsvTemplate() {
   URL.revokeObjectURL(url);
 }
 
-// 計画タブ: アコーディオン開閉状態（品目名 → true=開, false=閉）
+// 計画タブ: アコーディオン開閉状態（互換用・使用しなくなるが残す）
 const _planGroupOpen = {};
+
+let _p3OpenGroup = null;
 
 function renderPlanList() {
   const el = document.getElementById('plan-list');
@@ -1385,9 +1474,7 @@ function renderPlanList() {
   }).map(p => p.id);
   const bulkBar = document.getElementById('plan-bulk-bar');
   if (bulkBar) {
-    // 計画が1件以上あればバー表示（リセットボタンを常に使えるように）
     bulkBar.style.display = st.plans.length > 0 ? 'flex' : 'none';
-    // 完了済み削除ボタンは完了済みがある時だけ有効
     const delBtn = bulkBar.querySelector('button:first-child');
     if (delBtn) delBtn.style.opacity = completedIds.length > 0 ? '1' : '0.3';
     if (delBtn) delBtn.disabled = completedIds.length === 0;
@@ -1398,110 +1485,109 @@ function renderPlanList() {
     return;
   }
 
-  // 品目マスター登録順でグループ化
+  // グループ化（品目マスター順）
   const groupMap = {};
   const groupOrder = [];
   st.itemMaster.forEach(it => {
     const name = dispN(it);
     if (!groupMap[name]) { groupMap[name] = []; groupOrder.push(name); }
   });
-  // マスターにない品目は末尾に・数量0は非表示
   st.plans.forEach(p => {
-    if (toNum(p.qty) === 0) return; // 数量0は非表示
+    if (toNum(p.qty) === 0) return;
     const item = st.itemMaster.find(it => it.id === p.itemId);
     const name = dispN(item) || '不明';
     if (!groupMap[name]) { groupMap[name] = []; groupOrder.push(name); }
     groupMap[name].push(p);
   });
 
-  let html = '';
+  // タイル描画
+  let tilesHtml = '<div class="p2-grid">';
   groupOrder.forEach(groupName => {
     const plans = groupMap[groupName];
     if (!plans || !plans.length) return;
 
-    // グループ内を優先→納期順にソート
     const sorted = [...plans].sort((a,b) => {
       if (a.priority && !b.priority) return -1;
       if (!a.priority && b.priority) return 1;
       return a.date.localeCompare(b.date);
     });
 
-    // グループ完了判定（全planが完了）
     const isGroupDone = sorted.every(p => {
       const prog = st.progress[p.id] || {};
-      const postTotal = calcPostTotal(prog.postDone);
-      return toNum(p.qty) > 0 && postTotal >= toNum(p.qty);
+      return toNum(p.qty) > 0 && calcPostTotal(prog.postDone) >= toNum(p.qty);
     });
+    const hasPriority = sorted.some(p => p.priority);
+    const totalQty = sorted.reduce((s,p) => s + toNum(p.qty), 0);
+    // 最も近い納期
+    const nearestDate = sorted.map(p => p.date).filter(Boolean).sort()[0];
+    const tileCls = ['p2-tile', isGroupDone ? 'done' : '', hasPriority ? 'priority' : ''].filter(Boolean).join(' ');
 
-    // グループ合計数量・後工程合計
-    const groupTotalQty = sorted.reduce((s,p) => s + toNum(p.qty), 0);
-    const groupPostTotal = sorted.reduce((s,p) => {
-      const prog = st.progress[p.id] || {};
-      return s + calcPostTotal(prog.postDone);
-    }, 0);
-
-    // 開閉状態: 初回は完了グループを閉じる
-    if (_planGroupOpen[groupName] === undefined) {
-      _planGroupOpen[groupName] = !isGroupDone;
-    }
-    const isOpen = _planGroupOpen[groupName];
-
-    const doneBadge = isGroupDone
-      ? '<span style="padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;background:#1e293b;color:#64748b;margin-left:6px">✓完了</span>'
-      : '';
-    const chevron = isOpen ? '▼' : '▶';
-    const headerOpacity = isGroupDone ? 'opacity:0.6;' : '';
-
-    html += `<div style="margin-bottom:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
-      <div onclick="togglePlanGroup('${esc(groupName)}')"
-        style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#131c2e;cursor:pointer;${headerOpacity}">
-        <span style="font-size:13px;color:var(--muted);flex-shrink:0">${chevron}</span>
-        <span style="font-size:18px;font-weight:700;flex:1">${esc(groupName)}${doneBadge}</span>
-        <span style="font-size:14px;color:var(--muted)">合計 ${groupTotalQty}個</span>
-        <span style="font-size:14px;color:var(--g);margin-left:8px">後工程 ${groupPostTotal}個</span>
-      </div>
-      <div id="plangroup-${esc(groupName.replace(/\s/g,'_'))}" style="display:${isOpen?'block':'none'}">
-        ${sorted.map(p => {
-          const item = st.itemMaster.find(it => it.id === p.itemId);
-          const colorLabel = dispC(item) || p.itemId;
-          const prog = st.progress[p.id] || {};
-          const preDone = toNum(prog.preDone);
-          const postTotal = calcPostTotal(prog.postDone);
-          const qty = toNum(p.qty);
-          const isDone = qty > 0 && postTotal >= qty;
-          const doneStyle = isDone ? 'opacity:0.5;' : '';
-          const donePlanBadge = isDone ? '<span style="padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;background:#1e293b;color:#64748b;flex-shrink:0">✓完了</span>' : '';
-          return `<div class="plan-row" style="${doneStyle}border-radius:0;border-left:none;border-right:none;border-bottom:none">
-            ${p.priority ? '<span class="priority-badge">優先</span>' : ''}
-            ${donePlanBadge}
-            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <div style="font-size:18px;font-weight:700;flex:2;min-width:120px">${esc(colorLabel)}</div>
-              <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
-                <div style="text-align:center">
-                  <div style="font-size:11px;color:var(--muted)">数量</div>
-                  <div style="font-size:22px;font-weight:700;color:var(--t)">${qty}</div>
-                </div>
-              </div>
-              <div style="font-size:12px;color:var(--muted);width:100%">${fmtDate(p.date)}${p.memo ? '　'+esc(p.memo) : ''}</div>
-            </div>
-            <button class="btn-sm" onclick="togglePriority('${p.id}')">${p.priority ? '⭐':'☆'}</button>
-            <button class="btn-sm" onclick="openEditPlan('${p.id}')" title="編集">✏️</button>
-            <button class="btn-sm btn-danger" onclick="askDeletePlan('${p.id}')">🗑</button>
-          </div>`;
-        }).join('')}
-      </div>
+    tilesHtml += `<div class="${tileCls}" onclick="openP3Sheet('${esc(groupName)}')">
+      <div class="p2-tile-name">${esc(groupName)}${hasPriority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}</div>
+      <div class="p2-tile-qty">予定: ${totalQty}個</div>
+      <div class="p2-tile-progress" style="font-size:15px;color:var(--t)">${nearestDate ? fmtDate(nearestDate) : '－'}</div>
+      <div class="p2-tile-progress-label">${isGroupDone ? '✅ 完了' : '納期'}</div>
     </div>`;
   });
+  tilesHtml += '</div>';
+  el.innerHTML = tilesHtml;
+}
 
-  el.innerHTML = html;
+function renderP3SheetBody(groupName) {
+  document.getElementById('p3-sheet-title').textContent = groupName;
+  const body = document.getElementById('p3-sheet-body');
+
+  const groupMap = {};
+  st.plans.forEach(p => {
+    if (toNum(p.qty) === 0) return;
+    const item = st.itemMaster.find(it => it.id === p.itemId);
+    const name = dispN(item) || '不明';
+    if (!groupMap[name]) groupMap[name] = [];
+    groupMap[name].push(p);
+  });
+  const plans = groupMap[groupName] || [];
+  const sorted = [...plans].sort((a,b) => {
+    if (a.priority && !b.priority) return -1;
+    if (!a.priority && b.priority) return 1;
+    return a.date.localeCompare(b.date);
+  });
+
+  body.innerHTML = sorted.map(p => {
+    const item = st.itemMaster.find(it => it.id === p.itemId);
+    const colorName = dispC(item) || '?';
+    const qty = toNum(p.qty);
+    const prog = st.progress[p.id] || {};
+    const postTotal = calcPostTotal(prog.postDone);
+    const isDone = qty > 0 && postTotal >= qty;
+    return `<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #0d1520;gap:8px;flex-wrap:wrap">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:700">${esc(colorName)}${p.priority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}${isDone ? ' <span style="font-size:11px;color:var(--muted)">✓完了</span>' : ''}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:3px">予定: ${qty}個　納期: ${fmtDate(p.date)}${p.memo ? '　'+esc(p.memo) : ''}</div>
+      </div>
+      <button class="btn-sm" onclick="togglePriority('${p.id}')">${p.priority ? '⭐':'☆'}</button>
+      <button class="btn-sm" onclick="closeP3Sheet();openEditPlan('${p.id}')" title="編集">✏️</button>
+      <button class="btn-sm btn-danger" onclick="closeP3Sheet();askDeletePlan('${p.id}')">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+function openP3Sheet(groupName) {
+  _p3OpenGroup = groupName;
+  renderP3SheetBody(groupName);
+  document.getElementById('p3-overlay').classList.add('open');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.getElementById('p3-sheet').classList.add('open');
+  }));
+}
+
+function closeP3Sheet() {
+  _p3OpenGroup = null;
+  document.getElementById('p3-sheet').classList.remove('open');
+  document.getElementById('p3-overlay').classList.remove('open');
 }
 
 function togglePlanGroup(groupName) {
-  _planGroupOpen[groupName] = !_planGroupOpen[groupName];
-  const key = 'plangroup-' + groupName.replace(/\s/g,'_');
-  const el = document.getElementById(key);
-  if (el) el.style.display = _planGroupOpen[groupName] ? 'block' : 'none';
-  // ヘッダーのシェブロンも更新
+  // 互換用（呼び出し元が残っている場合のため）
   renderPlanList();
 }
 
