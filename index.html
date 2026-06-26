@@ -1157,17 +1157,26 @@ function renderP2SheetBody(g) {
 
   body.innerHTML = g.items.map(r => {
     const planId = r.plan.id;
-    return `<div class="p2-color-row">
-      <div class="p2-color-name">${esc(r.colorName || '?')}</div>
+    return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center">
+      <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}</div>
       <button class="p2-adj-btn" onclick="p2Adjust('${planId}',-1)">－</button>
       <input class="p2-num-input" type="number" id="p2-inp-${planId}"
         value="${r.myTodayVal}" min="0"
         onchange="p2SetPost('${planId}',this.value)">
       <button class="p2-adj-btn" onclick="p2Adjust('${planId}',1)">＋</button>
-      <div class="p2-color-stats">
-        <div style="font-size:13px;color:var(--muted)">予定: <span style="font-size:20px;font-weight:700;color:var(--t)">${r.qty}</span>個</div>
-        <div class="p2-stat-all">全端末: <span style="font-size:20px">${r.totalVal}</span>個</div>
-        <div class="p2-stat-mine">自分累計: <span style="font-size:20px">${r.myTotalVal}</span>個</div>
+      <div style="display:flex;gap:12px;margin-left:auto;align-items:baseline;flex-shrink:0">
+        <div style="text-align:center">
+          <div style="font-size:11px;color:var(--muted)">予定</div>
+          <div style="font-size:24px;font-weight:700;color:var(--t)">${r.qty}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:11px;color:#f87171">全端末</div>
+          <div style="font-size:24px;font-weight:700;color:#f87171">${r.totalVal}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:11px;color:#fbbf24">自分累計</div>
+          <div style="font-size:24px;font-weight:700;color:#fbbf24">${r.myTotalVal}</div>
+        </div>
       </div>
     </div>`;
   }).join('');
