@@ -540,12 +540,15 @@ let pollTimer = null;
 // 起動
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
+  // 旧キーを自動削除（本番アプリとの混入を防ぐ）
+  ['appState_v5', 'gasUrl', 'deviceName'].forEach(k => localStorage.removeItem(k));
+
   const saved = localStorage.getItem('appState_smart_v1');
   if (saved) {
     try { Object.assign(st, JSON.parse(saved)); } catch(e) {}
   }
   // gasUrl・deviceName は必ずlocalStorageから個別管理
-  // appState_v5のObject.assignで上書きされないよう、必ず後から読み直す
+  // appState_smart_v1のObject.assignで上書きされないよう、必ず後から読み直す
   gasUrl = localStorage.getItem('gasUrl_smart') || '';
   st.gasUrl = gasUrl;
   const dn = localStorage.getItem('deviceName_smart');
@@ -2346,8 +2349,8 @@ function applyCloudData(json, forceShiftAttend) {
       dispColor: String(it.dispColor || '')
     }));
   }
-  if (Array.isArray(json.plans)) {
-    // 空配列も反映（PC側で全削除した場合に対応）
+  if (Array.isArray(json.plans) && json.plans.length > 0) {
+    // クラウドに計画がある場合のみ反映（空のときはローカルを保持）
     st.plans = json.plans.map(p => ({
       id: String(p.id||''), date: sanitizeDateStr(p.date),
       itemId: String(p.itemId||''), qty: toNum(p.qty),
