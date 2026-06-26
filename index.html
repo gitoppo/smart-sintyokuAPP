@@ -1299,7 +1299,7 @@ function _applyPlanCsv(csvText, forceZero) {
     });
     _csvPendingZeroOverwrite = [];
     _showCsvResult(resultEl, 0, added, [], []);
-    if (added > 0) { saveLocal(); debouncedCloudSave(); renderAll(); showToast(`📂 計画を${added}件上書きしました`); }
+    if (added > 0) { saveLocal(); Cloud.savePlansProgress(null, null); renderAll(); showToast(`📂 計画を${added}件上書きしました`); }
     return;
   }
 
@@ -1382,7 +1382,7 @@ function _applyPlanCsv(csvText, forceZero) {
   });
 
   _showCsvResult(resultEl, added, updated, skipped, zeroWithProgress);
-  if (added > 0 || updated > 0) { saveLocal(); debouncedCloudSave(); renderAll(); showToast(`📂 新規${added}件追加・${updated}件上書きしました`); }
+  if (added > 0 || updated > 0) { saveLocal(); Cloud.savePlansProgress(null, null); renderAll(); showToast(`📂 新規${added}件追加・${updated}件上書きしました`); }
 }
 
 function _showCsvResult(resultEl, added, updated, skipped, zeroWithProgress) {
@@ -1609,15 +1609,20 @@ function addPlan() {
     qty: toNum(qty.value),
     date: sanitizeDateStr(dateEl.value) || todayStr(),
     memo: memo.value.trim(),
-    priority: pri.checked
+    priority: pri.checked,
+    _localOnly: true // 未送信フラグ
   };
   st.plans.push(plan);
   st.progress[plan.id] = { preDone:0, postDone:{} };
   memo.value = '';
   pri.checked = false;
   saveLocal();
-  // 計画登録は即時クラウド保存（debouncedだとポーリングと競合して消えることがある）
-  Cloud.savePlansProgress(null, null);
+  // 計画登録は即時クラウド保存
+  Cloud.savePlansProgress(() => {
+    // 送信成功後に_localOnlyフラグを削除
+    st.plans.forEach(p => { delete p._localOnly; });
+    saveLocal();
+  }, null);
   renderAll();
 }
 
@@ -1687,7 +1692,7 @@ function confirmResetAllPlans() {
   st.progress = {};
   closeModal('modal-reset-plans');
   saveLocal();
-  debouncedCloudSave();
+  Cloud.savePlansProgress(null, null); // 即時クラウド保存（空も確実に送信）
   renderAll();
   showToast('🔄 全計画・進捗データをリセットしました');
 }
@@ -2349,13 +2354,18 @@ function applyCloudData(json, forceShiftAttend) {
       dispColor: String(it.dispColor || '')
     }));
   }
-  if (Array.isArray(json.plans) && json.plans.length > 0) {
-    // クラウドに計画がある場合のみ反映（空のときはローカルを保持）
+  if (Array.isArray(json.plans)) {
+    // クラウドのplansを常に反映（空配列＝リセットも含む）
+    // ただしローカルに未送信の計画がある場合（クラウドにないIDが存在する）はマージ
+    const cloudIds = new Set(json.plans.map(p => String(p.id)));
+    const localOnlyPlans = st.plans.filter(p => !cloudIds.has(p.id) && p._localOnly);
     st.plans = json.plans.map(p => ({
       id: String(p.id||''), date: sanitizeDateStr(p.date),
       itemId: String(p.itemId||''), qty: toNum(p.qty),
       memo: String(p.memo||''), priority: !!p.priority
     }));
+    // ローカルのみの未送信計画があればマージ
+    if (localOnlyPlans.length > 0) st.plans.push(...localOnlyPlans);
   }
   if (json.progress && typeof json.progress === 'object') {
     const dn = st.deviceName;
