@@ -1158,7 +1158,10 @@ function renderP2SheetBody(g) {
   body.innerHTML = g.items.map(r => {
     const planId = r.plan.id;
     return `<div class="p2-color-row">
-      <div class="p2-color-name">${esc(r.colorName || '?')}</div>
+      <div style="min-width:72px;flex-shrink:0">
+        <div class="p2-color-name">${esc(r.colorName || '?')}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">予定: <span style="font-size:16px;font-weight:700;color:var(--t)">${r.qty}</span>個</div>
+      </div>
       <button class="p2-adj-btn" onclick="p2Adjust('${planId}',-1)">－</button>
       <input class="p2-num-input" type="number" id="p2-inp-${planId}"
         value="${r.myTodayVal}" min="0"
@@ -1580,10 +1583,10 @@ function renderP3SheetBody(groupName) {
     const prog = st.progress[p.id] || {};
     const postTotal = calcPostTotal(prog.postDone);
     const isDone = qty > 0 && postTotal >= qty;
-    return `<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #0d1520;gap:8px;flex-wrap:wrap">
+    return `<div style="display:flex;align-items:center;padding:14px 16px;border-bottom:1px solid #0d1520;gap:8px;flex-wrap:wrap">
       <div style="flex:1;min-width:0">
-        <div style="font-size:17px;font-weight:700">${esc(colorName)}${p.priority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}${isDone ? ' <span style="font-size:11px;color:var(--muted)">✓完了</span>' : ''}</div>
-        <div style="font-size:13px;color:var(--muted);margin-top:3px">予定: ${qty}個　納期: ${fmtDate(p.date)}${p.memo ? '　'+esc(p.memo) : ''}</div>
+        <div style="font-size:20px;font-weight:700">${esc(colorName)}${p.priority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}${isDone ? ' <span style="font-size:11px;color:var(--muted)">✓完了</span>' : ''}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:4px">予定: <span style="font-size:28px;font-weight:700;color:var(--t)">${qty}</span>個　納期: ${fmtDate(p.date)}${p.memo ? '　'+esc(p.memo) : ''}</div>
       </div>
       <button class="btn-sm" onclick="togglePriority('${p.id}')">${p.priority ? '⭐':'☆'}</button>
       <button class="btn-sm" onclick="closeP3Sheet();openEditPlan('${p.id}')" title="編集">✏️</button>
