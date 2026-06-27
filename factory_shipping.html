@@ -605,12 +605,29 @@ function renderItemTiles(){
     if(r.itemId && r.qty) palletQtyMap[r.itemId] = (palletQtyMap[r.itemId]||0) + (parseInt(r.qty)||0);
   });
 
-  el.innerHTML = Object.values(groups).map(g=>{
+  const allGroups = Object.values(groups);
+  const visibleGroups = _tileEditMode
+    ? allGroups
+    : allGroups.filter(g=>!_hiddenTiles.has(g.name));
+
+  // 固定3列
+  el.style.gridTemplateColumns = 'repeat(3, 1fr)';
+
+  el.innerHTML = visibleGroups.map(g=>{
     const groupQty = g.items.reduce((s,m)=>s+(palletQtyMap[m.id]||0),0);
     const hasQty = groupQty > 0;
-    return `<div class="item-tile${hasQty?' has-qty':''}" onclick="openBs('${esc(g.name)}')">
-      <div class="item-tile-name">${esc(g.name)}</div>
-      <div class="item-tile-count">${g.items.length}色${hasQty?` / 計${groupQty}`:''}</div>
+    const isHidden = _hiddenTiles.has(g.name);
+    const dispName = g.items[0]?.dispName || g.name;
+    const tileCls = ['item-tile', hasQty?'has-qty':'', _tileEditMode&&isHidden?'edit-mode':''].filter(Boolean).join(' ');
+    const onclick = _tileEditMode ? '' : `onclick="openBs('${esc(g.name)}')"`;
+    const hideBtn = _tileEditMode
+      ? isHidden
+        ? `<div class="tile-hide-btn" style="background:#27ae60;" onclick="showTile('${esc(g.name)}')">＋</div>`
+        : `<div class="tile-hide-btn" onclick="hideTile('${esc(g.name)}')">✕</div>`
+      : '';
+    return `<div class="${tileCls}" ${onclick}>
+      ${hideBtn}
+      <div class="item-tile-name">${esc(dispName)}</div>
     </div>`;
   }).join('');
 }
