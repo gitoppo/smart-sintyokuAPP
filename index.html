@@ -141,17 +141,17 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .plan-col-qty{font-size:26px;font-weight:700;color:var(--t);margin-top:4px;line-height:1}
 .plan-col-date{font-size:13px;color:var(--muted);margin-top:4px}
 /* ===== 個人タブ NEW：タイル＋ボトムシート ===== */
-.p2-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0}
+.p2-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px 0}
 .p2-tile{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 14px;cursor:pointer;transition:border-color .2s,background .2s;-webkit-tap-highlight-color:transparent;user-select:none}
 .p2-tile:active{background:#1a2535}
 .p2-tile.done{opacity:0.45;filter:grayscale(0.5)}
 .p2-tile.priority{border-color:var(--y)}
-.p2-tile-name{font-size:30px;font-weight:700;color:var(--text);line-height:1.2;margin-bottom:10px}
-.p2-tile-qty{font-size:36px;font-weight:700;color:var(--muted)}
-.p2-tile-progress{font-size:52px;font-weight:700;color:var(--g);line-height:1}
+.p2-tile-name{font-size:22px;font-weight:700;color:var(--text);line-height:1.2;margin-bottom:8px}
+.p2-tile-qty{font-size:28px;font-weight:700;color:var(--muted)}
+.p2-tile-progress{font-size:36px;font-weight:700;color:var(--g);line-height:1}
 .p2-tile-progress.zero{color:var(--muted)}
-.p2-tile-progress-label{font-size:14px;color:var(--muted);margin-top:6px}
-.p2-tile-bottom{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.p2-tile-progress-label{font-size:12px;color:var(--muted);margin-top:4px}
+.p2-tile-bottom{display:flex;align-items:baseline;justify-content:space-between;gap:4px}
 /* ボトムシート */
 .p2-sheet-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200}
 .p2-sheet-overlay.open{display:block}
