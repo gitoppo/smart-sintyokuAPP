@@ -92,6 +92,30 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .editSlipBody{padding:10px;}
 .editRow{display:grid;grid-template-columns:1fr 80px 32px;gap:6px;align-items:center;margin-bottom:6px;}
 
+/* ===== 品目タイル ===== */
+.item-tile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px 0;}
+.item-tile{background:#fff;border:2px solid #ddd;border-radius:12px;padding:12px 8px;cursor:pointer;text-align:center;transition:border-color .15s,background .15s;-webkit-tap-highlight-color:transparent;user-select:none;}
+.item-tile:active{background:#e8f0fe;}
+.item-tile-name{font-size:13px;font-weight:700;color:#1a1a2e;line-height:1.3;margin-bottom:4px;}
+.item-tile-count{font-size:11px;color:#888;}
+.item-tile.has-qty{border-color:#27ae60;background:#f0fff4;}
+
+/* ===== ボトムシート ===== */
+.bs-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;}
+.bs-overlay.open{display:block;}
+.bs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-radius:16px 16px 0 0;border-top:1px solid #ddd;z-index:301;max-height:80vh;overflow-y:auto;transform:translateY(100%);transition:transform .28s cubic-bezier(.32,1,.5,1);}
+.bs.open{transform:translateY(0);}
+.bs-handle{width:36px;height:4px;background:#ddd;border-radius:2px;margin:10px auto 0;}
+.bs-header{display:flex;align-items:center;padding:14px 16px 12px;border-bottom:1px solid #eee;gap:10px;}
+.bs-title{font-size:18px;font-weight:700;flex:1;color:#1a1a2e;}
+.bs-close{width:36px;height:36px;border-radius:50%;border:1px solid #ddd;background:#f5f5f5;color:#333;font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
+.bs-body{padding:12px 16px 24px;}
+.bs-color-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #eee;}
+.bs-color-name{font-size:14px;font-weight:600;flex:1;color:#333;}
+.bs-qty-input{width:70px;font-size:16px;text-align:center;border:1px solid #ccc;border-radius:6px;padding:6px 4px;}
+.bs-adj{width:36px;height:36px;border-radius:8px;background:#e8f0fe;color:#0f3460;font-size:20px;font-weight:bold;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;border:none;}
+.bs-pallet-select{font-size:13px;border:1px solid #ccc;border-radius:6px;padding:5px 8px;background:#fff;margin-top:6px;}
+
 /* ===== 印刷スタイル ===== */
 @media print{
   @page{margin:10mm;size:A4 portrait;}
@@ -162,16 +186,50 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <textarea id="shippingMemo" rows="2" placeholder="小型パレット使用など"></textarea>
     </div>
   </div>
+  <!-- 品目タイルグリッド -->
+  <div class="card">
+    <div class="cardTitle">品目を選択してパレットに追加</div>
+    <div id="itemTileGrid" class="item-tile-grid"></div>
+  </div>
+
+  <!-- パレット一覧 -->
   <div id="palletList"></div>
+
+  <!-- バラ出荷 -->
   <div class="baraBlock">
     <div class="baraHeader">🚗 バラ（助手席/その他）</div>
     <div class="baraBody" id="baraBody"></div>
   </div>
+
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
     <button class="btn-primary" onclick="addPallet()">＋ パレット追加</button>
     <button class="btn-success" onclick="openPrintDelivery()">🖨 納品書印刷</button>
     <button class="btn-gray" onclick="openPrintChecklist()">📋 チェックリスト印刷</button>
   </div>
+</div>
+
+<!-- ボトムシート：品目グループ選択 -->
+<div id="bs-overlay" class="bs-overlay" onclick="closeBs()"></div>
+<div id="bs" class="bs">
+  <div class="bs-handle"></div>
+  <div class="bs-header">
+    <div id="bs-title" class="bs-title"></div>
+    <div class="bs-close" onclick="closeBs()">✕</div>
+  </div>
+  <div class="bs-body">
+    <div id="bs-body"></div>
+    <div style="margin-top:12px;">
+      <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">追加先パレット</label>
+      <select id="bs-pallet-sel" class="bs-pallet-select" style="width:100%;"></select>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;">
+      <button class="btn-success" style="flex:1;" onclick="bsAddToPallet()">✅ パレットに追加</button>
+      <button class="btn-warn" style="flex:1;" onclick="bsAddToBara()">🚗 バラに追加</button>
+    </div>
+  </div>
+</div>
+
+
 </div>
 
 <!-- ②使用材料タブ -->
@@ -286,6 +344,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   loadLocalState();
   setDefaultDate();
   setDefaultMonth();
+  renderItemTiles();
   renderPallets();
   renderBara();
   renderMaterial();
@@ -429,7 +488,7 @@ async function loadFromGas(){
       }
       saveLocalState();
     }
-    renderPallets(); renderBara(); renderMaterial(); renderHistory();
+    renderItemTiles(); renderPallets(); renderBara(); renderMaterial(); renderHistory();
     toast('データを読み込みました');
   }catch(e){ toast('読み込みエラー: '+e.message); }
   finally{ showLoading(false); }
@@ -469,7 +528,7 @@ function startPolling(){
       if(shData.workData.pallets) st.pallets = shData.workData.pallets;
       if(shData.workData.bara)    st.bara    = shData.workData.bara;
       saveLocalState();
-      renderPallets(); renderBara(); renderMaterial();
+      renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
     }catch(e){}
   }, 30000);
 }
@@ -492,15 +551,167 @@ function itemOptions(selectedId){
   return items.map(m=>`<option value="${esc(m.id)}" ${m.id==selectedId?'selected':''}>${esc(m.name)}${m.color?' ('+esc(m.color)+')':''}</option>`).join('');
 }
 
+// ===== 品目タイル =====
+let _bsGroup = null; // 現在開いているグループ名
+
+function renderItemTiles(){
+  const el = document.getElementById('itemTileGrid');
+  if(!el) return;
+
+  // グループごとに集計（品目マスターのgroup列）
+  const groups = {};
+  const ids = plannedItemIds();
+  const items = ids.size > 0
+    ? st.itemMaster.filter(m=>ids.has(m.id))
+    : st.itemMaster;
+
+  items.forEach(m=>{
+    const g = m.group || 'その他';
+    if(!groups[g]) groups[g] = {name:g, items:[]};
+    groups[g].items.push(m);
+  });
+
+  if(Object.keys(groups).length === 0){
+    el.innerHTML = '<p style="color:#999;font-size:12px;grid-column:1/-1;padding:8px;">品目マスターを読み込んでください</p>';
+    return;
+  }
+
+  // パレット内の品目数量を集計（タイルに緑枠表示用）
+  const palletQtyMap = {};
+  st.pallets.forEach(p=>p.rows.forEach(r=>{
+    if(r.itemId && r.qty) palletQtyMap[r.itemId] = (palletQtyMap[r.itemId]||0) + (parseInt(r.qty)||0);
+  }));
+  st.bara.forEach(r=>{
+    if(r.itemId && r.qty) palletQtyMap[r.itemId] = (palletQtyMap[r.itemId]||0) + (parseInt(r.qty)||0);
+  });
+
+  el.innerHTML = Object.values(groups).map(g=>{
+    const groupQty = g.items.reduce((s,m)=>s+(palletQtyMap[m.id]||0),0);
+    const hasQty = groupQty > 0;
+    return `<div class="item-tile${hasQty?' has-qty':''}" onclick="openBs('${esc(g.name)}')">
+      <div class="item-tile-name">${esc(g.name)}</div>
+      <div class="item-tile-count">${g.items.length}色${hasQty?` / 計${groupQty}`:''}</div>
+    </div>`;
+  }).join('');
+}
+
+function openBs(groupName){
+  _bsGroup = groupName;
+  const ids = plannedItemIds();
+  const allItems = ids.size > 0 ? st.itemMaster.filter(m=>ids.has(m.id)) : st.itemMaster;
+  const groupItems = allItems.filter(m=>(m.group||'その他')===groupName);
+
+  document.getElementById('bs-title').textContent = groupName;
+
+  // パレット選択肢を更新
+  const palSel = document.getElementById('bs-pallet-sel');
+  palSel.innerHTML = st.pallets.map((p,i)=>`<option value="${i}">パレット ${i+1}</option>`).join('');
+
+  // ボディ：カラーごとに数量入力行
+  const body = document.getElementById('bs-body');
+  body.innerHTML = groupItems.map(m=>{
+    // 現在のパレット登録数量を取得
+    let currentQty = 0;
+    st.pallets.forEach(p=>p.rows.forEach(r=>{ if(r.itemId==m.id) currentQty+=(parseInt(r.qty)||0); }));
+    st.bara.forEach(r=>{ if(r.itemId==m.id) currentQty+=(parseInt(r.qty)||0); });
+    return `<div class="bs-color-row">
+      <div class="bs-color-name">${esc(m.color||m.name)}</div>
+      <div class="bs-adj" onclick="bsAdj('${esc(m.id)}',-1)">－</div>
+      <input class="bs-qty-input" type="number" min="0" id="bs-inp-${esc(m.id)}" value="0" placeholder="0">
+      <div class="bs-adj" onclick="bsAdj('${esc(m.id)}',1)">＋</div>
+      ${currentQty>0?`<div style="font-size:11px;color:#27ae60;margin-left:4px;">登録済${currentQty}</div>`:''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('bs-overlay').classList.add('open');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    document.getElementById('bs').classList.add('open');
+  }));
+}
+
+function closeBs(){
+  document.getElementById('bs').classList.remove('open');
+  document.getElementById('bs-overlay').classList.remove('open');
+  _bsGroup = null;
+}
+
+function bsAdj(itemId, delta){
+  const inp = document.getElementById('bs-inp-'+itemId);
+  if(!inp) return;
+  const v = Math.max(0, (parseInt(inp.value)||0) + delta);
+  inp.value = v;
+}
+
+function bsAddToPallet(){
+  const palIdx = parseInt(document.getElementById('bs-pallet-sel').value);
+  if(isNaN(palIdx)||!st.pallets[palIdx]){ toast('パレットを選択してください'); return; }
+
+  const ids = plannedItemIds();
+  const allItems = ids.size > 0 ? st.itemMaster.filter(m=>ids.has(m.id)) : st.itemMaster;
+  const groupItems = allItems.filter(m=>(m.group||'その他')===_bsGroup);
+
+  let added = 0;
+  groupItems.forEach(m=>{
+    const inp = document.getElementById('bs-inp-'+m.id);
+    const qty = parseInt(inp?.value)||0;
+    if(qty <= 0) return;
+    // 既存行があれば数量を加算、なければ新規追加
+    const existing = st.pallets[palIdx].rows.find(r=>r.itemId==m.id);
+    if(existing){
+      existing.qty = (parseInt(existing.qty)||0) + qty;
+    } else {
+      // 空行があれば置き換え
+      const empty = st.pallets[palIdx].rows.find(r=>!r.itemId);
+      if(empty){ empty.itemId=m.id; empty.qty=qty; }
+      else st.pallets[palIdx].rows.push({itemId:m.id, qty});
+    }
+    added++;
+  });
+
+  if(added===0){ toast('数量を入力してください'); return; }
+  saveLocalState(); renderPallets(); renderBara(); renderMaterial(); renderItemTiles();
+  saveShippingWork();
+  closeBs();
+  toast(`パレット${palIdx+1}に追加しました`);
+}
+
+function bsAddToBara(){
+  const ids = plannedItemIds();
+  const allItems = ids.size > 0 ? st.itemMaster.filter(m=>ids.has(m.id)) : st.itemMaster;
+  const groupItems = allItems.filter(m=>(m.group||'その他')===_bsGroup);
+
+  let added = 0;
+  groupItems.forEach(m=>{
+    const inp = document.getElementById('bs-inp-'+m.id);
+    const qty = parseInt(inp?.value)||0;
+    if(qty <= 0) return;
+    const existing = st.bara.find(r=>r.itemId==m.id);
+    if(existing){
+      existing.qty = (parseInt(existing.qty)||0) + qty;
+    } else {
+      const empty = st.bara.find(r=>!r.itemId);
+      if(empty){ empty.itemId=m.id; empty.qty=qty; }
+      else st.bara.push({itemId:m.id, qty});
+    }
+    added++;
+  });
+
+  if(added===0){ toast('数量を入力してください'); return; }
+  saveLocalState(); renderPallets(); renderBara(); renderMaterial(); renderItemTiles();
+  saveShippingWork();
+  closeBs();
+  toast('バラに追加しました');
+}
+
 // ===== パレット管理 =====
 function addPallet(){
   st.pallets.push(newPallet());
-  saveLocalState(); renderPallets(); renderMaterial(); saveShippingWork();
+  saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
 }
 function removePallet(idx){
   if(st.pallets.length<=1){ toast('パレットは最低1つ必要です'); return; }
   st.pallets.splice(idx,1);
-  saveLocalState(); renderPallets(); renderMaterial(); saveShippingWork();
+  saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
 }
 function addPalletRow(idx){
   st.pallets[idx].rows.push({itemId:'',qty:''});
@@ -509,11 +720,11 @@ function addPalletRow(idx){
 function removePalletRow(pIdx,rIdx){
   if(st.pallets[pIdx].rows.length<=1){ toast('行は最低1つ必要です'); return; }
   st.pallets[pIdx].rows.splice(rIdx,1);
-  saveLocalState(); renderPallets(); renderMaterial(); saveShippingWork();
+  saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
 }
 function onPalletChange(pIdx,rIdx,field,val){
   st.pallets[pIdx].rows[rIdx][field] = field==='qty'?(parseInt(val)||''):val;
-  saveLocalState(); renderMaterial(); debounceWorkSave();
+  saveLocalState(); renderItemTiles(); renderMaterial(); debounceWorkSave();
 }
 function renderPallets(){
   const el = document.getElementById('palletList');
@@ -549,7 +760,7 @@ function addBaraRow(){
 function removeBaraRow(idx){
   if(st.bara.length<=1){ toast('行は最低1つ必要です'); return; }
   st.bara.splice(idx,1);
-  saveLocalState(); renderBara(); renderMaterial(); saveShippingWork();
+  saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
 }
 function onBaraChange(idx,field,val){
   st.bara[idx][field] = field==='qty'?(parseInt(val)||''):val;
