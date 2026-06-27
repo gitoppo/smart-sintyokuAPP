@@ -435,6 +435,23 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
     </div>
     <div id="sync-status" class="sync-status mt8"></div>
   </div>
+  <div class="card mt8">
+    <div class="card-title mb8">📊 端末別進捗レポート</div>
+    <div class="f12 text-muted mb8">クラウドの最新データを日付別・端末別に集計します</div>
+    <button class="btn-sm btn-success" onclick="openReportSheet()" style="width:100%;padding:14px;font-size:16px">📊 レポートを表示</button>
+  </div>
+</div>
+
+<!-- 進捗レポートボトムシート -->
+<div id="report-overlay" class="p2-sheet-overlay" onclick="closeReportSheet()"></div>
+<div id="report-sheet" class="p2-sheet" style="max-height:90vh">
+  <div class="p2-sheet-handle"></div>
+  <div class="p2-sheet-header">
+    <div class="p2-sheet-title">📊 端末別進捗レポート</div>
+    <div class="p2-sheet-close" onclick="closeReportSheet()">✕</div>
+  </div>
+  <div id="report-date-tabs" style="display:flex;gap:6px;padding:10px 16px;overflow-x:auto;border-bottom:1px solid var(--border)"></div>
+  <div id="report-body" style="overflow-y:auto"></div>
 </div>
 
 <!-- 計画削除確認モーダル -->
@@ -2464,6 +2481,123 @@ function applyCloudData(json, forceShiftAttend) {
       st.weeklyAttend = json.shiftAttend.weeklyAttend;
     }
   }
+}
+
+// ============================================================
+// 端末別進捗レポート
+// ============================================================
+let _reportSelectedDate = null;
+let _reportData = null;
+
+async function openReportSheet() {
+  // クラウドから最新データを取得
+  showSyncStatus('📊 データ取得中...', true);
+  const json = await Cloud.get();
+  if (!json || !json.ok) {
+    showSyncStatus('❌ データ取得失敗', false);
+    return;
+  }
+  _reportData = json;
+
+  // postDoneに存在する全日付を抽出
+  const dateSet = new Set();
+  Object.values(json.progress || {}).forEach(v => {
+    Object.keys(v.postDone || {}).forEach(k => {
+      const m = k.match(/^(.+)_(\d{4}-\d{2}-\d{2})$/);
+      if (m) dateSet.add(m[2]);
+    });
+  });
+  const dates = [...dateSet].sort().reverse(); // 新しい日付順
+
+  if (!dates.length) {
+    alert('進捗データがありません');
+    return;
+  }
+
+  _reportSelectedDate = dates[0];
+  renderReportDateTabs(dates);
+  renderReportBody();
+
+  document.getElementById('report-overlay').classList.add('open');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.getElementById('report-sheet').classList.add('open');
+  }));
+  showSyncStatus('📊 レポート表示中', true);
+}
+
+function closeReportSheet() {
+  document.getElementById('report-sheet').classList.remove('open');
+  document.getElementById('report-overlay').classList.remove('open');
+}
+
+function renderReportDateTabs(dates) {
+  const el = document.getElementById('report-date-tabs');
+  el.innerHTML = dates.map(d => {
+    const isSelected = d === _reportSelectedDate;
+    return `<button onclick="selectReportDate('${d}')"
+      style="flex-shrink:0;padding:8px 14px;border-radius:8px;border:1px solid ${isSelected ? 'var(--b)' : 'var(--border)'};
+      background:${isSelected ? 'var(--b)' : 'var(--faint)'};color:${isSelected ? '#fff' : 'var(--muted)'};
+      font-size:15px;font-weight:${isSelected ? '700' : '400'};cursor:pointer">
+      ${fmtDateShort(d)}
+    </button>`;
+  }).join('');
+}
+
+function selectReportDate(date) {
+  _reportSelectedDate = date;
+  // 日付タブの選択状態を更新
+  const dates = [...document.getElementById('report-date-tabs').querySelectorAll('button')]
+    .map(b => b.onclick.toString().match(/'(\d{4}-\d{2}-\d{2})'/)?.[1]).filter(Boolean);
+  renderReportDateTabs(dates);
+  renderReportBody();
+}
+
+function renderReportBody() {
+  const body = document.getElementById('report-body');
+  const json = _reportData;
+  const date = _reportSelectedDate;
+  if (!json || !date) return;
+
+  let html = '';
+  st.plans.forEach(plan => {
+    const item = st.itemMaster.find(it => it.id === plan.itemId);
+    const groupName = item ? dispN(item) : '不明';
+    const colorName = item ? dispC(item) : '?';
+    const qty = toNum(plan.qty);
+    if (qty === 0) return;
+
+    const prog = (json.progress || {})[plan.id] || {};
+    const postDone = prog.postDone || {};
+
+    // 指定日付の端末別データを抽出
+    const deviceEntries = Object.entries(postDone)
+      .filter(([k]) => k.endsWith('_' + date))
+      .map(([k, v]) => ({ device: k.replace('_' + date, ''), val: toNum(v) }))
+      .filter(e => e.val > 0)
+      .sort((a, b) => b.val - a.val);
+
+    const dayTotal = deviceEntries.reduce((s, e) => s + e.val, 0);
+    if (dayTotal === 0) return;
+
+    html += `<div style="padding:14px 16px;border-bottom:1px solid #0d1520">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
+        <span style="font-size:18px;font-weight:700">${esc(groupName)}</span>
+        <span style="font-size:15px;color:var(--muted)">${esc(colorName)}</span>
+        <span style="font-size:13px;color:var(--muted);margin-left:auto">予定 ${qty}個</span>
+      </div>
+      ${deviceEntries.map(e => `
+        <div style="display:flex;align-items:center;padding:4px 0">
+          <span style="font-size:16px;color:var(--muted);flex:1">${esc(e.device)}</span>
+          <span style="font-size:24px;font-weight:700;color:var(--b)">${e.val}<span style="font-size:13px;font-weight:400;color:var(--muted)">個</span></span>
+        </div>`).join('')}
+      <div style="display:flex;align-items:center;padding:6px 0 0;border-top:1px solid var(--border);margin-top:4px">
+        <span style="font-size:15px;font-weight:700;flex:1">合計</span>
+        <span style="font-size:28px;font-weight:700;color:${dayTotal >= qty ? 'var(--g)' : 'var(--t)'}">${dayTotal}<span style="font-size:13px;font-weight:400;color:var(--muted)">個</span></span>
+      </div>
+    </div>`;
+  });
+
+  body.innerHTML = html || `<div style="padding:20px;text-align:center;color:var(--muted)">この日付のデータはありません</div>`;
 }
 
 async function pullFromCloud() {
