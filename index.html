@@ -972,29 +972,26 @@ function renderAlertBar(groups) {
     return;
   }
 
-  // サイクル全体の必要工数（分）
+  // サイクル全体の必要工数（後工程ベース）
   let totalNeedMin = 0;
   groups.forEach(g => {
     g.plans.forEach(p => {
-      if (toNum(p.qty) === 0) return; // 数量0は計算対象外
+      if (toNum(p.qty) === 0) return;
       const item = st.itemMaster.find(it => it.id === p.itemId);
       if (!item) return;
-      totalNeedMin += toNum(p.qty) * toNum(item.prePh);
       totalNeedMin += toNum(p.qty) * toNum(item.postPh);
     });
   });
 
-  // 残り必要工数（分）
+  // 残り必要工数（予定数 - 後工程完了数）× postPh
   let totalRemMin = 0;
   groups.forEach(g => {
     g.plans.forEach(p => {
-      if (toNum(p.qty) === 0) return; // 数量0は計算対象外
+      if (toNum(p.qty) === 0) return;
       const item = st.itemMaster.find(it => it.id === p.itemId);
       if (!item) return;
       const prog = st.progress[p.id];
-      const preDone = prog ? toNum(prog.preDone) : 0;
       const postTotal = prog ? calcPostTotal(prog.postDone) : 0;
-      totalRemMin += Math.max(0, toNum(p.qty) - preDone) * toNum(item.prePh);
       totalRemMin += Math.max(0, toNum(p.qty) - postTotal) * toNum(item.postPh);
     });
   });
@@ -1002,7 +999,6 @@ function renderAlertBar(groups) {
   const cap = calcCycleCapacityRealtime();
   const needH = totalNeedMin / 60;
   const remH  = totalRemMin  / 60;
-  // 進捗済工数 = サイクル全体必要 - 残り必要
   const elapsedH = Math.max(0, needH - remH);
 
   if (!cap.totalHours) {
@@ -1013,7 +1009,6 @@ function renderAlertBar(groups) {
     return;
   }
 
-  // 余裕/不足 = サイクル全勤怠時間(固定) - 必要残工数
   const diff = cap.totalHours - remH;
   if (diff >= 0) {
     bar.className = 'alert-ok';
