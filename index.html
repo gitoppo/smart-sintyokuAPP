@@ -300,19 +300,8 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
         ・品目名＋カラーが品目マスターに登録済みであること<br>
         ・ヘッダー行は自動スキップ
       </div>
-      <!-- 追記・上書きモード選択 -->
-      <div style="display:flex;gap:16px;margin-bottom:10px;font-size:13px">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="radio" name="plan-csv-mode" value="append" checked>
-          <span>追記</span>
-          <span class="f12 text-muted">（既存計画はそのまま）</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="radio" name="plan-csv-mode" value="overwrite">
-          <span>上書き</span>
-          <span class="f12 text-muted">（同一品目＋カラーの未完了を更新・数量0はスキップ）</span>
-        </label>
-      </div>
+      <!-- 上書き固定 -->
+      <div style="margin-bottom:10px;font-size:12px;color:var(--muted)">同一品目＋カラーの未完了を更新・数量0はスキップ（インポート前に自動バックアップされます）</div>
       <div class="flex gap8" style="flex-wrap:wrap">
         <label style="flex:1;min-width:160px">
           <input type="file" id="plan-csv-file" accept=".csv,.xlsx" onchange="importPlanCsv(this)"
@@ -326,13 +315,10 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
     </div>
   </div>
 
-  <!-- 完了済み一括削除バー -->
-  <div id="plan-bulk-bar" style="display:none;margin-bottom:8px;gap:6px">
-    <button class="btn-sm btn-danger" onclick="askDeleteCompleted()" style="flex:1;padding:10px;font-size:13px;font-weight:600">
-      🗑 完了済みを一括削除
-    </button>
-    <button class="btn-sm" onclick="askResetAllPlans()" style="flex:1;padding:10px;font-size:13px;font-weight:600;border-color:#7c3aed;color:#a78bfa;background:#1e1040">
-      🔄 全計画をリセット
+  <!-- 直前の計画に戻すボタン -->
+  <div id="plan-undo-bar" style="display:none;margin-bottom:8px">
+    <button class="btn-sm" onclick="undoPlansImport()" style="width:100%;padding:10px;font-size:13px;font-weight:600;border-color:#0891b2;color:#67e8f9;background:#0c2a35">
+      ↩️ 直前のインポート前の状態に戻す
     </button>
   </div>
   <div id="plan-list"></div>
@@ -467,34 +453,6 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 </div>
 
 <!-- 完了済み一括削除確認モーダル -->
-<div id="modal-del-completed" class="modal-overlay">
-  <div class="modal-box">
-    <div class="modal-title">🗑 完了済み計画を一括削除</div>
-    <div id="modal-del-completed-body" class="f13 text-muted mb12"></div>
-    <div class="flex gap8">
-      <button class="btn-sm" onclick="closeModal('modal-del-completed')" style="flex:1">キャンセル</button>
-      <button class="btn-sm btn-danger" onclick="confirmDeleteCompleted()" style="flex:1">削除する</button>
-    </div>
-  </div>
-</div>
-
-<!-- 全計画リセット確認モーダル -->
-<div id="modal-reset-plans" class="modal-overlay">
-  <div class="modal-box">
-    <div class="modal-title" style="color:#a78bfa">🔄 全計画をリセット</div>
-    <div class="f13 text-muted mb12">
-      <strong style="color:#fca5a5">全ての計画と進捗データを削除します。</strong><br>
-      この操作は元に戻せません。<br>
-      品目マスターの並び順変更・再インポート前などにご使用ください。
-    </div>
-    <div id="modal-reset-plans-body" class="f13 text-muted mb12"></div>
-    <div class="flex gap8">
-      <button class="btn-sm" onclick="closeModal('modal-reset-plans')" style="flex:1">キャンセル</button>
-      <button class="btn-sm btn-danger" onclick="confirmResetAllPlans()" style="flex:1;background:#450a0a">全て削除する</button>
-    </div>
-  </div>
-</div>
-
 <!-- 計画編集モーダル -->
 <div id="modal-edit-plan" class="modal-overlay">
   <div class="modal-box">
@@ -1348,6 +1306,7 @@ function importPlanCsv(input) {
     } else {
       csvText = e.target.result;
     }
+    _backupPlansProgress();
     _applyPlanCsv(csvText, false);
     input.value = '';
   };
@@ -1358,11 +1317,39 @@ function importPlanCsv(input) {
   }
 }
 
+// インポート前にlocalStorageへバックアップ
+function _backupPlansProgress() {
+  try {
+    const backup = {
+      plans: JSON.parse(JSON.stringify(st.plans)),
+      progress: JSON.parse(JSON.stringify(st.progress)),
+      savedAt: new Date().toLocaleString('ja-JP')
+    };
+    localStorage.setItem('planBackup_smart_v1', JSON.stringify(backup));
+    document.getElementById('plan-undo-bar').style.display = 'block';
+  } catch(e) { console.warn('バックアップ失敗', e); }
+}
+
+function undoPlansImport() {
+  const raw = localStorage.getItem('planBackup_smart_v1');
+  if (!raw) { alert('バックアップがありません'); return; }
+  const backup = JSON.parse(raw);
+  if (!confirm(`${backup.savedAt} のバックアップに戻しますか？`)) return;
+  st.plans    = backup.plans;
+  st.progress = backup.progress;
+  localStorage.removeItem('planBackup_smart_v1');
+  document.getElementById('plan-undo-bar').style.display = 'none';
+  saveLocal();
+  Cloud.savePlansProgress(null, null);
+  renderAll();
+  showToast('↩️ インポート前の状態に戻しました');
+}
+
 // forceZero=true のとき _csvPendingZeroOverwrite を強制適用
 function _applyPlanCsv(csvText, forceZero) {
   const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
   const resultEl = document.getElementById('plan-csv-result');
-  const importMode = document.querySelector('input[name="plan-csv-mode"]:checked')?.value || 'append';
+  const importMode = 'overwrite'; // 上書き固定
   let added = 0, updated = 0, skipped = [], zeroWithProgress = [], rowNum = 0;
 
   // forceZero時は保留リストをそのまま適用
@@ -1548,19 +1535,9 @@ function renderPlanList() {
   });
   if (curVal) sel.value = curVal;
 
-  // 完了済みバーの表示制御
-  const completedIds = st.plans.filter(p => {
-    const prog = st.progress[p.id] || {};
-    const postTotal = calcPostTotal(prog.postDone);
-    return postTotal >= toNum(p.qty) && toNum(p.qty) > 0;
-  }).map(p => p.id);
-  const bulkBar = document.getElementById('plan-bulk-bar');
-  if (bulkBar) {
-    bulkBar.style.display = st.plans.length > 0 ? 'flex' : 'none';
-    const delBtn = bulkBar.querySelector('button:first-child');
-    if (delBtn) delBtn.style.opacity = completedIds.length > 0 ? '1' : '0.3';
-    if (delBtn) delBtn.disabled = completedIds.length === 0;
-  }
+  // バックアップがあれば戻すボタンを表示
+  const undoBar = document.getElementById('plan-undo-bar');
+  if (undoBar) undoBar.style.display = localStorage.getItem('planBackup_smart_v1') ? 'block' : 'none';
 
   if (!st.plans.length) {
     el.innerHTML = '<div class="text-muted f13" style="padding:12px">計画がありません</div>';
