@@ -764,14 +764,25 @@ function renderProgress() {
       const prog = st.progress[p.id];
       return s + (prog ? calcPostTotal(prog.postDone) : 0);
     }, 0);
-    const progressCls = totalPost === 0 ? 'p2-tile-progress zero' : 'p2-tile-progress';
+    const remaining   = Math.max(0, totalQty - totalPost);
+    const postColor   = totalPost === 0 ? 'var(--muted)' : 'var(--g)';
+    const remColor    = isDone ? 'var(--g)' : 'var(--r)';
     const tileCls = ['p2-tile', isDone ? 'done' : '', hasPriority ? 'priority' : ''].filter(Boolean).join(' ');
     return `<div class="${tileCls}" onclick="openP1Sheet('${esc(g.name)}')">
       <div class="p2-tile-name">${esc(g.name)}${hasPriority ? ' <span style="font-size:14px;color:#fb923c">●優先</span>' : ''}</div>
-      <div style="margin-top:8px">
-        <div style="font-size:13px;color:var(--muted)">予定: <span style="font-size:22px;font-weight:700;color:var(--muted)">${totalQty}</span>個</div>
-        <div class="${progressCls}" style="font-size:52px;margin-top:4px">${totalPost}<span style="font-size:14px;font-weight:400;color:var(--muted)">個</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">${isDone ? '✅ 完了' : ''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;gap:4px">
+        <div style="text-align:center;flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">予定</div>
+          <div style="font-size:28px;font-weight:700;color:var(--muted);line-height:1">${totalQty}</div>
+        </div>
+        <div style="text-align:center;flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">進捗</div>
+          <div style="font-size:28px;font-weight:700;color:${postColor};line-height:1">${totalPost}</div>
+        </div>
+        <div style="text-align:center;flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">残</div>
+          <div style="font-size:28px;font-weight:700;color:${remColor};line-height:1">${isDone ? '✅' : remaining}</div>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1158,14 +1169,25 @@ function renderPersonal() {
     const totalPost   = g.items.reduce((s, r) => s + r.totalVal, 0);
     const isDone      = totalQty > 0 && totalPost >= totalQty;
     const hasPriority = g.items.some(r => r.plan.priority);
-    const progressCls = totalPost === 0 ? 'p2-tile-progress zero' : 'p2-tile-progress';
+    const remaining   = Math.max(0, totalQty - totalPost);
+    const postColor   = totalPost === 0 ? 'var(--muted)' : 'var(--g)';
+    const remColor    = isDone ? 'var(--g)' : 'var(--r)';
     const tileCls     = ['p2-tile', isDone ? 'done' : '', hasPriority ? 'priority' : ''].filter(Boolean).join(' ');
     return `<div class="${tileCls}" onclick="openP2Sheet('${esc(g.name)}')">
       <div class="p2-tile-name">${esc(g.name)}${hasPriority ? ' <span style="font-size:14px;color:#fb923c">●優先</span>' : ''}</div>
-      <div style="margin-top:8px">
-        <div style="font-size:13px;color:var(--muted)">予定: <span style="font-size:22px;font-weight:700;color:var(--muted)">${totalQty}</span>個</div>
-        <div class="${progressCls}" style="font-size:52px;margin-top:4px">${totalPost}<span style="font-size:14px;font-weight:400;color:var(--muted)">個</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">${isDone ? '✅ 完了' : ''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;gap:4px">
+        <div style="text-align:center;flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">予定</div>
+          <div style="font-size:28px;font-weight:700;color:var(--muted);line-height:1">${totalQty}</div>
+        </div>
+        <div style="text-align:center;flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">進捗</div>
+          <div style="font-size:28px;font-weight:700;color:${postColor};line-height:1">${totalPost}</div>
+        </div>
+        <div style="text-align:center;flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">残</div>
+          <div style="font-size:28px;font-weight:700;color:${remColor};line-height:1">${isDone ? '✅' : remaining}</div>
+        </div>
       </div>
     </div>`;
   }).join('');
