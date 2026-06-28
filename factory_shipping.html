@@ -469,19 +469,18 @@ async function loadFromGas(){
     const shData = await gasGet('getShipping');
     if(shData){
       if(shData.deliveryHistory){
-        const existing = new Set(st.deliveryHistory.map(r=>r.id));
-        shData.deliveryHistory.forEach(r=>{
-          if(!existing.has(r.id)){
-            // 旧形式→新形式変換
-            if(!r.slips && r.palletsJson){
-              try{
-                const pw = JSON.parse(r.palletsJson);
-                r.palletsSnapshot = pw;
-                r.slips = [];
-              }catch(e){}
-            }
-            st.deliveryHistory.push(r);
+        // GASのデータで常に上書き（全端末で同じ履歴を共有）
+        st.deliveryHistory = shData.deliveryHistory.map(r=>{
+          // palletsJsonにslipsが入っている場合は展開
+          if(!r.slips && r.palletsJson){
+            try{
+              const pw = JSON.parse(r.palletsJson);
+              if(pw.slips) r.slips = pw.slips;
+              if(pw.palletsSnapshot) r.palletsSnapshot = pw.palletsSnapshot;
+            }catch(e){}
           }
+          if(!r.slips) r.slips = [];
+          return r;
         });
       }
       if(shData.workData && st.pallets.every(p=>p.rows.every(r=>!r.itemId))){
