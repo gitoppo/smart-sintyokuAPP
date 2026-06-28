@@ -1041,12 +1041,17 @@ function openPrintChecklist(){
     </div></div>`);
   }
 
+  // 2列4パレット：4つずつページに配置
   let printContent='';
-  for(let i=0;i<blocks.length;i++){
-    printContent+=blocks[i];
-    const isLast=(i===blocks.length-1);
-    const isPageEnd=((i+1)%3===0);
-    if(!isLast) printContent+=isPageEnd?`<div class="checklist-page-break"></div>`:checkDivider;
+  for(let i=0; i<blocks.length; i+=4){
+    const group=blocks.slice(i,i+4);
+    while(group.length<4) group.push('');
+    printContent+=`<div class="checklist-page">
+      <div class="checklist-cell">${group[0]}</div>
+      <div class="checklist-cell">${group[1]}</div>
+      <div class="checklist-cell">${group[2]}</div>
+      <div class="checklist-cell">${group[3]}</div>
+    </div>`;
   }
   document.getElementById('printArea').innerHTML=printContent;
   saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist');
