@@ -1078,7 +1078,8 @@ function buildSlipHTML(slip,date,memo){
 // ===== 印刷：チェックリスト =====
 function openPrintChecklist(){
   const validPallets=st.pallets.filter(p=>p.rows.some(r=>r.itemId&&r.qty));
-  if(validPallets.length===0){ toast('品目を登録してください'); return; }
+  const validBara=st.bara.filter(r=>r.itemId&&r.qty);
+  if(validPallets.length===0 && validBara.length===0){ toast('品目を登録してください'); return; }
   const date=document.getElementById('shippingDate').value||today();
   const deliveryNo=document.getElementById('deliveryNo').value.trim();
   const checkDivider=`<div class="checklist-divider"><div class="checklist-divider-line"></div><div class="checklist-divider-label"></div><div class="checklist-divider-line"></div></div>`;
@@ -1094,7 +1095,6 @@ function openPrintChecklist(){
     </div></div>`;
   });
 
-  const validBara=st.bara.filter(r=>r.itemId&&r.qty);
   if(validBara.length>0){
     blocks.push(`<div class="checklist-pallet"><div class="checklist-pallet-inner">
       <div class="checklist-title">🚗 バラ　<span style="font-size:8pt;font-weight:normal;">${date}</span></div>
