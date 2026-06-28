@@ -244,6 +244,12 @@ tr:nth-child(even) td{background:#f9f9f9;}
 <div id="tabMaterial" class="tabContent">
   <div class="card">
     <div class="cardTitle">使用材料一覧（原反幅 1220mm）</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+      <label style="font-size:12px;color:#666;white-space:nowrap;">集計日</label>
+      <input type="date" id="materialDate" style="width:160px;">
+      <button class="btn-primary btn-sm" onclick="calcMaterialFromHistory()">📊 集計</button>
+      <button class="btn-gray btn-sm" onclick="setMaterialToday()">今日</button>
+    </div>
     <div id="materialTable"></div>
   </div>
 </div>
@@ -352,6 +358,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
   loadLocalState();
   setDefaultDate();
   setDefaultMonth();
+  // 使用材料の集計日も今日に初期化
+  const matDate = document.getElementById('materialDate');
+  if(matDate && !matDate.value) matDate.value = today();
   renderItemTiles();
   renderPallets();
   renderBara();
@@ -889,13 +898,20 @@ function groupRowsByGroup(allRows){
   });
   return Object.entries(gMap).map(([groupName,itemMap])=>({groupName,rows:Object.values(itemMap)}));
 }
-function calcMaterial(){
-  const allRows = collectAllRows();
+
+// 納品書履歴から品目・数量を集計してシート品番ごとに材料使用量を計算
+function calcMaterialFromSlips(slipRows){
+  // slipRows: [{name, color, qty, itemId}]
+  // itemMasterからシート品番・寸法を取得
   const itemMap={};
-  allRows.forEach(r=>{
-    if(!itemMap[r.item.id]) itemMap[r.item.id]={item:r.item,totalQty:0};
-    itemMap[r.item.id].totalQty+=r.qty;
+  slipRows.forEach(r=>{
+    const item = st.itemMaster.find(m=>m.id==r.itemId || (m.name==r.name && m.color==r.color));
+    if(!item) return;
+    const key = item.id;
+    if(!itemMap[key]) itemMap[key]={item,totalQty:0};
+    itemMap[key].totalQty += parseInt(r.qty)||0;
   });
+
   const grouped={};
   Object.values(itemMap).forEach(({item,totalQty})=>{
     const cutW=parseFloat(item.cutW)||0;
@@ -913,24 +929,65 @@ function calcMaterial(){
   });
   return grouped;
 }
-function renderMaterial(){
-  const el=document.getElementById('materialTable');
-  const grouped=calcMaterial();
-  const keys=Object.keys(grouped);
-  if(keys.length===0){ el.innerHTML='<p style="color:#999;font-size:12px;padding:8px;">パレットに品目を登録すると表示されます</p>'; return; }
-  let html='<table><thead><tr><th>品目名</th><th>数量</th><th>幅取り</th><th>使用長(m)</th></tr></thead><tbody>';
+
+function setMaterialToday(){
+  document.getElementById('materialDate').value = today();
+  calcMaterialFromHistory();
+}
+
+function calcMaterialFromHistory(){
+  const date = document.getElementById('materialDate').value;
+  const el = document.getElementById('materialTable');
+  if(!date){ el.innerHTML='<p style="color:#999;font-size:12px;padding:8px;">集計日を選択してください</p>'; return; }
+
+  // 指定日の発行済み納品書を集計
+  const records = st.deliveryHistory.filter(r=>
+    r.type !== 'checklist' &&
+    r.shippingDate === date &&
+    r.slips && r.slips.length > 0
+  );
+
+  if(records.length === 0){
+    el.innerHTML=`<p style="color:#999;font-size:12px;padding:8px;">${date} の発行済み納品書がありません</p>`;
+    return;
+  }
+
+  // 全納品書の品目・数量をまとめる
+  const allSlipRows=[];
+  records.forEach(rec=>{
+    rec.slips.forEach(s=>{
+      s.rows.forEach(r=>allSlipRows.push(r));
+    });
+  });
+
+  const grouped = calcMaterialFromSlips(allSlipRows);
+  const keys = Object.keys(grouped);
+  if(keys.length===0){ el.innerHTML='<p style="color:#999;font-size:12px;padding:8px;">材料データがありません（品目マスターに寸法を登録してください）</p>'; return; }
+
+  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px;">📅 ${date}　納品書 ${records.length}件から集計</div>`;
+  html+='<table><thead><tr><th>品目名</th><th>数量</th><th>幅取り</th><th>使用長(m)</th></tr></thead><tbody>';
   keys.forEach(key=>{
     const g=grouped[key];
     html+=`<tr class="group-header"><td colspan="3">📄 ${esc(key)}</td><td>合計 ${g.totalM.toFixed(2)} m</td></tr>`;
     g.rows.forEach(r=>{
-      html+=`<tr><td>${esc(r.item.name)}${r.item.color?` <span style="color:#666;font-size:11px;">(${esc(r.item.color)})</span>`:''}</td>
-      <td style="text-align:right;">${r.totalQty}</td>
-      <td style="text-align:center;">${r.note||r.takiCount+'枚取'}</td>
-      <td style="text-align:right;">${r.note?r.note:r.usedM.toFixed(2)+' m'}</td></tr>`;
+      html+=`<tr>
+        <td>${esc(r.item.name)}${r.item.color?` <span style="color:#666;font-size:11px;">(${esc(r.item.color)})</span>`:''}</td>
+        <td style="text-align:right;">${r.totalQty}</td>
+        <td style="text-align:center;">${r.note||r.takiCount+'枚取'}</td>
+        <td style="text-align:right;">${r.note?r.note:r.usedM.toFixed(2)+' m'}</td>
+      </tr>`;
     });
   });
   html+='</tbody></table>';
   el.innerHTML=html;
+}
+
+function renderMaterial(){
+  // タブ切替時はメッセージのみ表示（集計ボタンで実行）
+  const el=document.getElementById('materialTable');
+  const date=document.getElementById('materialDate')?.value;
+  if(date){ calcMaterialFromHistory(); return; }
+  el.innerHTML='<p style="color:#999;font-size:12px;padding:8px;">集計日を選択して「集計」を押してください</p>';
 }
 
 // ===== 印刷：納品書 =====
