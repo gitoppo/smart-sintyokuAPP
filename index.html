@@ -849,15 +849,14 @@ function closeP1Sheet() {
 }
 
 function buildPreGroups() {
-  // 品目名（表示名優先）でグルーピング・数量0は除外
+  // 品目マスター順にグルーピング・数量0は除外
   const map = {};
-  st.plans.forEach(plan => {
-    if (toNum(plan.qty) === 0) return; // 数量0は非表示
-    const item = st.itemMaster.find(it => it.id === plan.itemId);
-    if (!item) return;
+  st.itemMaster.forEach(item => {
+    const plans = st.plans.filter(p => p.itemId === item.id && toNum(p.qty) > 0);
+    if (plans.length === 0) return;
     const key = dispN(item);
     if (!map[key]) map[key] = { name: key, plans: [], items: [] };
-    map[key].plans.push(plan);
+    plans.forEach(plan => map[key].plans.push(plan));
     if (!map[key].items.find(it => it.id === item.id)) map[key].items.push(item);
   });
   return Object.values(map);
