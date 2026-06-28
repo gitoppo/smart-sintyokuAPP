@@ -140,17 +140,18 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .slip-table th{background:#eee;}
   .slip-total{text-align:right;font-size:8pt;margin-top:1mm;}
 
-  /* チェックリスト */
-  .checklist-pallet{page-break-inside:avoid;}
-  .checklist-pallet-inner{padding-bottom:4mm;}
-  .checklist-title{font-size:11pt;font-weight:bold;margin-bottom:2mm;}
-  .checklist-table{width:100%;border-collapse:collapse;font-size:10pt;}
-  .checklist-table th,.checklist-table td{border:1px solid #000;padding:3mm 2mm;}
-  .checklist-table th{background:#eee;}
-  .checklist-check{width:10mm;text-align:center;}
-  .checklist-divider{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;}
-  .checklist-divider-line{width:10mm;border-top:1px dashed #000;flex:none;}
-  .checklist-divider-label{display:none;}
+  /* チェックリスト：2列4パレット（A4上下2分割） */
+  .checklist-page{width:100%;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:138mm 138mm;gap:0;page-break-after:always;}
+  .checklist-page:last-child{page-break-after:auto;}
+  .checklist-cell{height:138mm;box-sizing:border-box;overflow:hidden;padding:3mm;border:0.5px solid #ccc;}
+  .checklist-pallet{height:100%;box-sizing:border-box;}
+  .checklist-pallet-inner{height:100%;box-sizing:border-box;}
+  .checklist-title{font-size:10pt;font-weight:bold;margin-bottom:2mm;}
+  .checklist-table{width:100%;border-collapse:collapse;font-size:9pt;}
+  .checklist-table th,.checklist-table td{border:1px solid #000;padding:1.5mm 2mm;}
+  .checklist-table th{background:#eee;font-size:8.5pt;}
+  .checklist-check{width:8mm;text-align:center;}
+  .checklist-divider{display:none;}
   .checklist-page-break{page-break-after:always;}
 
   /* 請求書印刷 */
@@ -993,7 +994,7 @@ function buildSlipHTML(slip,date,memo){
   return `
     <div class="slip-title">納品書</div>
     <div class="slip-info">
-      <div><div><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div><div style="font-size:8pt;">${esc(settings.clientAddr)||''}</div></div>
+      <div><div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div><div style="font-size:8pt;">${esc(settings.clientAddr)||''}</div></div>
       <div style="text-align:right;"><div>${esc(settings.companyName)||'自社名'}</div><div style="font-size:8pt;">${esc(settings.companyAddr)||''}</div><div style="font-size:8pt;">TEL: ${esc(settings.companyTel)||''}</div></div>
     </div>
     <div class="slip-meta">出荷日: ${date}　伝票No: ${esc(slip.slipNo)}　品目: ${esc(slip.groupName)}${memo?' 　備考: '+esc(memo):''}</div>
@@ -1023,8 +1024,8 @@ function openPrintChecklist(){
     const validRows=p.rows.filter(r=>r.itemId&&r.qty);
     const palletNo=st.pallets.indexOf(p)+1;
     return `<div class="checklist-pallet"><div class="checklist-pallet-inner">
-      <div class="checklist-title">📦 パレット ${palletNo}　<span style="font-size:9pt;font-weight:normal;">${date}</span></div>
-      <table class="checklist-table"><thead><tr><th class="checklist-check">✓</th><th>品目名</th><th>カラー</th><th style="width:18mm;text-align:right;">数量</th></tr></thead><tbody>
+      <div class="checklist-title">📦 パレット ${palletNo}　<span style="font-size:8pt;font-weight:normal;">${date}</span></div>
+      <table class="checklist-table"><thead><tr><th class="checklist-check">✓</th><th>品目名</th><th>カラー</th><th style="width:14mm;text-align:right;">数量</th></tr></thead><tbody>
         ${validRows.map(r=>{const item=st.itemMaster.find(m=>m.id==r.itemId);if(!item)return'';return`<tr><td class="checklist-check">□</td><td>${esc(item.name)}</td><td>${esc(item.color||'')}</td><td style="text-align:right;">${r.qty}</td></tr>`;}).join('')}
       </tbody></table>
     </div></div>`;
@@ -1033,8 +1034,8 @@ function openPrintChecklist(){
   const validBara=st.bara.filter(r=>r.itemId&&r.qty);
   if(validBara.length>0){
     blocks.push(`<div class="checklist-pallet"><div class="checklist-pallet-inner">
-      <div class="checklist-title">🚗 バラ（助手席/その他）　<span style="font-size:9pt;font-weight:normal;">${date}</span></div>
-      <table class="checklist-table"><thead><tr><th class="checklist-check">✓</th><th>品目名</th><th>カラー</th><th style="width:18mm;text-align:right;">数量</th></tr></thead><tbody>
+      <div class="checklist-title">🚗 バラ　<span style="font-size:8pt;font-weight:normal;">${date}</span></div>
+      <table class="checklist-table"><thead><tr><th class="checklist-check">✓</th><th>品目名</th><th>カラー</th><th style="width:14mm;text-align:right;">数量</th></tr></thead><tbody>
         ${validBara.map(r=>{const item=st.itemMaster.find(m=>m.id==r.itemId);if(!item)return'';return`<tr><td class="checklist-check">□</td><td>${esc(item.name)}</td><td>${esc(item.color||'')}</td><td style="text-align:right;">${r.qty}</td></tr>`;}).join('')}
       </tbody></table>
     </div></div>`);
