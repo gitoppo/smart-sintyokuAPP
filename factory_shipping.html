@@ -141,9 +141,16 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .slip-total{text-align:right;font-size:8pt;margin-top:1mm;}
 
   /* チェックリスト：2列4パレット（A4上下2分割） */
-  .checklist-page{width:100%;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:138mm 138mm;gap:0;page-break-after:always;}
+  /* 構成: 上段138mm + カットライン8mm + 下段131mm(余白7mm込み) = 277mm */
+  .checklist-page{width:100%;page-break-after:always;}
   .checklist-page:last-child{page-break-after:auto;}
-  .checklist-cell{height:138mm;box-sizing:border-box;overflow:hidden;padding:3mm;border:0.5px solid #ccc;}
+  .checklist-row{display:grid;grid-template-columns:1fr 1fr;gap:0;}
+  .checklist-row-top .checklist-cell{height:138mm;}
+  .checklist-row-bottom .checklist-cell{height:131mm;padding-top:10mm;}
+  .checklist-cell{box-sizing:border-box;overflow:hidden;padding:3mm;border:none;}
+  .checklist-cutline{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;}
+  .checklist-cutline-line{width:12mm;border-top:1px dashed #000;flex:none;}
+  .checklist-cutline-label{display:none;}
   .checklist-pallet{height:100%;box-sizing:border-box;}
   .checklist-pallet-inner{height:100%;box-sizing:border-box;}
   .checklist-title{font-size:10pt;font-weight:bold;margin-bottom:2mm;}
@@ -1041,16 +1048,27 @@ function openPrintChecklist(){
     </div></div>`);
   }
 
-  // 2列4パレット：4つずつページに配置
+  // 2列4パレット：上段2＋カットライン＋下段2
+  const cutlineHTML=`<div class="checklist-cutline">
+    <div class="checklist-cutline-line"></div>
+    <div class="checklist-cutline-label"></div>
+    <div class="checklist-cutline-line"></div>
+  </div>`;
+
   let printContent='';
   for(let i=0; i<blocks.length; i+=4){
     const group=blocks.slice(i,i+4);
     while(group.length<4) group.push('');
     printContent+=`<div class="checklist-page">
-      <div class="checklist-cell">${group[0]}</div>
-      <div class="checklist-cell">${group[1]}</div>
-      <div class="checklist-cell">${group[2]}</div>
-      <div class="checklist-cell">${group[3]}</div>
+      <div class="checklist-row checklist-row-top">
+        <div class="checklist-cell">${group[0]}</div>
+        <div class="checklist-cell">${group[1]}</div>
+      </div>
+      ${cutlineHTML}
+      <div class="checklist-row checklist-row-bottom">
+        <div class="checklist-cell">${group[2]}</div>
+        <div class="checklist-cell">${group[3]}</div>
+      </div>
     </div>`;
   }
   document.getElementById('printArea').innerHTML=printContent;
