@@ -771,17 +771,17 @@ function renderProgress() {
     return `<div class="${tileCls}" onclick="openP1Sheet('${esc(g.name)}')">
       <div class="p2-tile-name">${esc(g.name)}${hasPriority ? ' <span style="font-size:14px;color:#fb923c">●優先</span>' : ''}</div>
       <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;gap:2px">
-        <div style="text-align:center;flex:1;min-width:0">
+        <div style="text-align:center;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:11px;color:var(--muted);margin-bottom:3px">予定</div>
-          <div style="font-size:42px;font-weight:700;color:var(--muted);line-height:1">${totalQty}</div>
+          <div style="font-size:42px;font-weight:700;color:var(--muted);line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalQty).length >= 3 ? 0.7 : 1})">${totalQty}</div>
         </div>
-        <div style="text-align:center;flex:1;min-width:0">
+        <div style="text-align:center;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:11px;color:var(--muted);margin-bottom:3px">進捗</div>
-          <div style="font-size:42px;font-weight:700;color:${postColor};line-height:1">${totalPost}</div>
+          <div style="font-size:42px;font-weight:700;color:${postColor};line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalPost).length >= 3 ? 0.7 : 1})">${totalPost}</div>
         </div>
-        <div style="text-align:center;flex:1;min-width:0">
+        <div style="text-align:center;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:11px;color:var(--muted);margin-bottom:3px">残</div>
-          <div style="font-size:42px;font-weight:700;color:${remColor};line-height:1">${isDone ? '✅' : remaining}</div>
+          <div style="font-size:42px;font-weight:700;color:${remColor};line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(remaining).length >= 3 ? 0.7 : 1})">${isDone ? '✅' : remaining}</div>
         </div>
       </div>
     </div>`;
@@ -1176,17 +1176,17 @@ function renderPersonal() {
     return `<div class="${tileCls}" onclick="openP2Sheet('${esc(g.name)}')">
       <div class="p2-tile-name">${esc(g.name)}${hasPriority ? ' <span style="font-size:14px;color:#fb923c">●優先</span>' : ''}</div>
       <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;gap:2px">
-        <div style="text-align:center;flex:1;min-width:0">
+        <div style="text-align:center;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:11px;color:var(--muted);margin-bottom:3px">予定</div>
-          <div style="font-size:42px;font-weight:700;color:var(--muted);line-height:1">${totalQty}</div>
+          <div style="font-size:42px;font-weight:700;color:var(--muted);line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalQty).length >= 3 ? 0.7 : 1})">${totalQty}</div>
         </div>
-        <div style="text-align:center;flex:1;min-width:0">
+        <div style="text-align:center;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:11px;color:var(--muted);margin-bottom:3px">進捗</div>
-          <div style="font-size:42px;font-weight:700;color:${postColor};line-height:1">${totalPost}</div>
+          <div style="font-size:42px;font-weight:700;color:${postColor};line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalPost).length >= 3 ? 0.7 : 1})">${totalPost}</div>
         </div>
-        <div style="text-align:center;flex:1;min-width:0">
+        <div style="text-align:center;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:11px;color:var(--muted);margin-bottom:3px">残</div>
-          <div style="font-size:42px;font-weight:700;color:${remColor};line-height:1">${isDone ? '✅' : remaining}</div>
+          <div style="font-size:42px;font-weight:700;color:${remColor};line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(remaining).length >= 3 ? 0.7 : 1})">${isDone ? '✅' : remaining}</div>
         </div>
       </div>
     </div>`;
