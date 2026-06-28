@@ -985,6 +985,7 @@ function printDelivery(grouped, existingRecord){
   } else {
     saveDeliveryRecord(slips,date,memo,'delivery');
   }
+  closeBs();
   window.print();
 }
 
@@ -1048,6 +1049,7 @@ function openPrintChecklist(){
   }
   document.getElementById('printArea').innerHTML=printContent;
   saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist');
+  closeBs();
   window.print();
 }
 
@@ -1267,6 +1269,7 @@ function printInvoice(){
   const content=document.getElementById('invoicePrintContent');
   if(!content){ toast('先に集計してください'); return; }
   document.getElementById('printArea').innerHTML=`<div class="invoice-print">${content.innerHTML}</div>`;
+  closeBs();
   window.print();
 }
 
