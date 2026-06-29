@@ -144,8 +144,8 @@ tr:nth-child(even) td{background:#f9f9f9;}
   /* 納品書3連：A4を均等3分割 */
   .slip-page{width:100%;display:block;}
   .slip-page-break{page-break-after:always;}
-  .slip-unit{width:100%;height:87mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
-  .slip-divider{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;flex-shrink:0;}
+  .slip-unit{width:100%;height:84mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
+  .slip-divider{width:100%;height:7mm;display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;flex-shrink:0;}
   .slip-divider-line{width:10mm;border-top:1px dashed #000;flex:none;}
   .slip-divider-label{display:none;}
   .delivery-slip{flex:1;padding:2mm 3mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
@@ -697,8 +697,8 @@ function openBs(groupName){
     let currentQty = 0;
     st.pallets.forEach(p=>p.rows.forEach(r=>{ if(r.itemId==m.id) currentQty+=(parseInt(r.qty)||0); }));
     st.bara.forEach(r=>{ if(r.itemId==m.id) currentQty+=(parseInt(r.qty)||0); });
-    return `<div class="bs-color-row">
-      <div style="flex:1;">
+    return `<div class="bs-color-row" style="flex-wrap:wrap;">
+      <div style="flex:1;min-width:120px;">
         <div class="bs-color-name">${esc(m.color||m.name)}</div>
         ${m.caseQty>0?`<div style="font-size:11px;color:#888;">1ケース=${m.caseQty}個</div>`:''}
       </div>
@@ -708,6 +708,10 @@ function openBs(groupName){
       <div class="bs-adj" onclick="bsAdj('${esc(m.id)}',1)">＋</div>
       <div id="bs-case-${esc(m.id)}" style="min-width:60px;font-size:12px;color:#0f3460;text-align:right;"></div>
       ${currentQty>0?`<div style="font-size:11px;color:#27ae60;margin-left:4px;">登録済${currentQty}</div>`:''}
+      <div style="width:100%;margin-top:6px;">
+        <input type="text" id="bs-memo-${esc(m.id)}" placeholder="備考（補修分・直送分など）"
+          style="font-size:13px;border:1px solid #ddd;border-radius:6px;padding:6px 8px;width:100%;">
+      </div>
     </div>`;
   }).join('');
 
@@ -755,15 +759,17 @@ function bsAddToPallet(){
     const inp = document.getElementById('bs-inp-'+m.id);
     const qty = parseInt(inp?.value)||0;
     if(qty <= 0) return;
+    const memo_ = document.getElementById('bs-memo-'+m.id)?.value.trim()||'';
     // 既存行があれば数量を加算、なければ新規追加
     const existing = st.pallets[palIdx].rows.find(r=>r.itemId==m.id);
     if(existing){
       existing.qty = (parseInt(existing.qty)||0) + qty;
+      if(memo_) existing.memo = memo_;
     } else {
       // 空行があれば置き換え
       const empty = st.pallets[palIdx].rows.find(r=>!r.itemId);
-      if(empty){ empty.itemId=m.id; empty.qty=qty; }
-      else st.pallets[palIdx].rows.push({itemId:m.id, qty});
+      if(empty){ empty.itemId=m.id; empty.qty=qty; empty.memo=memo_; }
+      else st.pallets[palIdx].rows.push({itemId:m.id, qty, memo:memo_});
     }
     added++;
   });
@@ -785,13 +791,15 @@ function bsAddToBara(){
     const inp = document.getElementById('bs-inp-'+m.id);
     const qty = parseInt(inp?.value)||0;
     if(qty <= 0) return;
+    const memo_ = document.getElementById('bs-memo-'+m.id)?.value.trim()||'';
     const existing = st.bara.find(r=>r.itemId==m.id);
     if(existing){
       existing.qty = (parseInt(existing.qty)||0) + qty;
+      if(memo_) existing.memo = memo_;
     } else {
       const empty = st.bara.find(r=>!r.itemId);
-      if(empty){ empty.itemId=m.id; empty.qty=qty; }
-      else st.bara.push({itemId:m.id, qty});
+      if(empty){ empty.itemId=m.id; empty.qty=qty; empty.memo=memo_; }
+      else st.bara.push({itemId:m.id, qty, memo:memo_});
     }
     added++;
   });
@@ -896,6 +904,7 @@ function renderPallets(){
           return `<div class="pallet-row-ext">
             <div style="flex:1;min-width:0;">
               <div class="pallet-row-label">${esc(label)}</div>
+              ${r.memo?`<div style="font-size:11px;color:#e67e22;">📝 ${esc(r.memo)}</div>`:''}
               ${item&&item.caseQty>0?`<div class="pallet-row-sub">1箱=${item.caseQty}個</div>`:''}
               ${warning}
             </div>
@@ -992,14 +1001,14 @@ function collectAllRows(){
     p.rows.forEach(r=>{
       if(r.itemId&&r.qty){
         const item = st.itemMaster.find(m=>m.id==r.itemId);
-        if(item) rows.push({item,qty:parseInt(r.qty)||0});
+        if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||''});
       }
     });
   });
   st.bara.forEach(r=>{
     if(r.itemId&&r.qty){
       const item = st.itemMaster.find(m=>m.id==r.itemId);
-      if(item) rows.push({item,qty:parseInt(r.qty)||0});
+      if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||''});
     }
   });
   return rows;
@@ -1010,8 +1019,9 @@ function groupRowsByGroup(allRows){
     const g=r.item.group||'未分類';
     if(!gMap[g]) gMap[g]={};
     const k=r.item.id;
-    if(!gMap[g][k]) gMap[g][k]={item:r.item,qty:0};
+    if(!gMap[g][k]) gMap[g][k]={item:r.item,qty:0,memo:r.memo||''};
     gMap[g][k].qty+=r.qty;
+    if(r.memo) gMap[g][k].memo=r.memo;
   });
   return Object.entries(gMap).map(([groupName,itemMap])=>({groupName,rows:Object.values(itemMap)}));
 }
@@ -1283,25 +1293,52 @@ function printDelivery(grouped, existingRecord, startNo=1){
 }
 
 function buildSlipHTML(slip,date,memo){
+  const totalQty = slip.rows.reduce((s,r)=>s+r.qty,0);
   return `
     <div class="slip-title">納品書</div>
     <div class="slip-info">
-      <div><div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div><div style="font-size:8pt;">${esc(settings.clientAddr)||''}</div></div>
-      <div style="text-align:right;"><div>${esc(settings.companyName)||'自社名'}</div><div style="font-size:8pt;">${esc(settings.companyAddr)||''}</div><div style="font-size:8pt;">TEL: ${esc(settings.companyTel)||''}</div></div>
+      <div>
+        <div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div>
+        <div style="font-size:8pt;">${esc(settings.clientAddr)||''}</div>
+      </div>
+      <div style="text-align:right;font-size:8pt;">
+        <div style="font-size:9pt;">${esc(settings.companyName)||'自社名'}</div>
+        <div>${esc(settings.companyAddr)||''}</div>
+        <div>TEL: ${esc(settings.companyTel)||''}</div>
+        <div style="margin-top:1mm;">出荷日: ${date}</div>
+        <div>伝票No: ${esc(slip.slipNo)}</div>
+      </div>
     </div>
-    <div class="slip-meta">出荷日: ${date}　伝票No: ${esc(slip.slipNo)}　品目: ${esc(slip.groupName)}${memo?' 　備考: '+esc(memo):''}</div>
     <table class="slip-table">
-      <thead><tr><th>品目名</th><th>カラー</th><th>数量</th><th>単価</th><th>金額</th></tr></thead>
+      <thead><tr><th>品目名</th><th>カラー</th><th style="text-align:right;">数量</th><th style="text-align:right;">単価</th><th style="text-align:right;">金額</th><th>備考</th></tr></thead>
       <tbody>
         ${slip.rows.map(r=>`<tr>
-          <td>${esc(r.name)}</td><td>${esc(r.color)}</td>
+          <td>${esc(r.name)}</td>
+          <td>${esc(r.color)}</td>
           <td style="text-align:right;">${r.qty}</td>
           <td style="text-align:right;">${r.price?r.price.toLocaleString():''}</td>
           <td style="text-align:right;">${r.amount?r.amount.toLocaleString():''}</td>
+          <td style="font-size:8pt;">${esc(r.memo||'')}</td>
         </tr>`).join('')}
+        <tr style="border-top:1px solid #000;">
+          <td colspan="2" style="text-align:right;font-weight:bold;">合計</td>
+          <td style="text-align:right;font-weight:bold;">${totalQty}</td>
+          <td></td>
+          <td style="text-align:right;font-weight:bold;">${slip.subtotal?slip.subtotal.toLocaleString():''}</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right;">消費税(10%)</td>
+          <td style="text-align:right;">${slip.tax?slip.tax.toLocaleString():''}</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right;font-weight:bold;">税込合計</td>
+          <td style="text-align:right;font-weight:bold;">${slip.total?slip.total.toLocaleString():''}</td>
+          <td></td>
+        </tr>
       </tbody>
-    </table>
-    <div class="slip-total">小計: ${slip.subtotal.toLocaleString()}円　消費税(10%): ${slip.tax.toLocaleString()}円　<b>税込合計: ${slip.total.toLocaleString()}円</b></div>`;
+    </table>`;
 }
 
 // ===== 印刷：チェックリスト =====
