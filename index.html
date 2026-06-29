@@ -2266,7 +2266,8 @@ function importCsv(input) {
         group:    String(cols[7]  || 'その他'),
         price:    parseFloat(cols[8]) || 0,
         dispName:  String(cols[9]  || ''),
-        dispColor: String(cols[10] || '')
+        dispColor: String(cols[10] || ''),
+        caseQty:   parseFloat(cols[11]) || 0
       });
     });
     st.itemMaster = items;
