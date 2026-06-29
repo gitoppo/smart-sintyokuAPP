@@ -991,25 +991,50 @@ function renderMaterial(){
 }
 
 // ===== 印刷：納品書 =====
-function autoSlipNo(date,index){
-  const d=date?date.replace(/-/g,'').slice(2):today().replace(/-/g,'').slice(2);
-  return d+'-'+String(index+1).padStart(2,'0');
+function autoSlipNo(date, index, startNo){
+  const d = date ? date.replace(/-/g,'').slice(2) : today().replace(/-/g,'').slice(2);
+  return d + '-' + String(startNo + index).padStart(2,'0');
 }
 
-function openPrintDelivery(){
+// 指定日の発行済み納品書件数をGASから取得
+async function getTodaySlipCount(date){
+  try{
+    const shData = await gasGet('getShipping');
+    if(!shData || !shData.deliveryHistory) return 0;
+    // 指定日の納品書（checklist除く）のslips合計件数を取得
+    const count = shData.deliveryHistory
+      .filter(r=> r.type !== 'checklist' && r.shippingDate === date)
+      .reduce((s,r)=> s + ((r.slips && r.slips.length) || 0), 0);
+    return count;
+  }catch(e){
+    console.warn('件数取得エラー:', e);
+    return 0;
+  }
+}
+
+async function openPrintDelivery(){
   const allRows=collectAllRows();
   if(allRows.length===0){ toast('品目を登録してください'); return; }
   const grouped=groupRowsByGroup(allRows);
-  printDelivery(grouped);
+  const date=document.getElementById('shippingDate').value||today();
+  showLoading(true);
+  try{
+    const existingCount = await getTodaySlipCount(date);
+    printDelivery(grouped, null, existingCount + 1);
+  }catch(e){
+    printDelivery(grouped, null, 1);
+  }finally{
+    showLoading(false);
+  }
 }
 
-function printDelivery(grouped, existingRecord){
+function printDelivery(grouped, existingRecord, startNo=1){
   const date=document.getElementById('shippingDate').value||today();
   const memo=document.getElementById('shippingMemo').value.trim();
 
   // slipsを生成（品目・数量・金額を記録）
   const slips=grouped.map((g,gi)=>{
-    const slipNo=autoSlipNo(date,gi);
+    const slipNo=autoSlipNo(date,gi,startNo);
     const rows=g.rows.map(r=>({
       itemId: r.item.id,
       name:   r.item.name,
