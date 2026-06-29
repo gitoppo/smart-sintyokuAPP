@@ -1249,7 +1249,7 @@ function renderHistory(){
         <span style="color:#666;font-size:11px;">▼</span>
       </div>
       <div class="historyBody" id="hb_${i}">
-        <div style="margin-bottom:6px;font-size:12px;">端末: ${esc(r.deviceName||'—')}　発行: ${r.timestamp?r.timestamp.slice(0,16).replace('T',' '):'—'}${r.memo?'　メモ: '+esc(r.memo):''}</div>
+        <div style="margin-bottom:6px;font-size:12px;">端末: ${esc(r.deviceName||'—')}　発行: ${toJST(r.timestamp)}${r.memo?'　メモ: '+esc(r.memo):''}</div>
         ${(r.slips||[]).map(s=>`
           <div class="historySlip">
             <div class="historySlipHead">
@@ -1476,6 +1476,13 @@ function showTab(id){
 }
 
 // ===== ユーティリティ =====
+// UTC→日本時間（JST）に変換して表示用文字列を返す
+function toJST(isoStr){
+  if(!isoStr) return '—';
+  const d = new Date(isoStr);
+  if(isNaN(d.getTime())) return isoStr.slice(0,16).replace('T',' ');
+  return d.toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
 function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
