@@ -1108,18 +1108,20 @@ function printDelivery(grouped, existingRecord, startNo=1){
     </div>`;
   }
   document.getElementById('printArea').innerHTML=printContent;
+  closeBs();
+  window.print();
 
-  // 履歴保存（新規or既存更新）
+  // 印刷後に履歴保存（新規or既存更新）
   if(existingRecord){
     existingRecord.slips=slips;
     existingRecord.shippingDate=date;
     existingRecord.memo=memo;
     existingRecord.updatedAt=new Date().toISOString();
+    saveLocalState();
+    renderHistory();
   } else {
     saveDeliveryRecord(slips,date,memo,'delivery');
   }
-  closeBs();
-  window.print();
 }
 
 function buildSlipHTML(slip,date,memo){
@@ -1197,9 +1199,9 @@ function openPrintChecklist(){
     </div>`;
   }
   document.getElementById('printArea').innerHTML=printContent;
-  saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist');
   closeBs();
   window.print();
+  saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist');
 }
 
 // ===== 履歴保存 =====
