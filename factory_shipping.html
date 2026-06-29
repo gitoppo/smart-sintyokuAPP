@@ -1312,14 +1312,19 @@ function buildSlipHTML(slip,date,memo){
     <table class="slip-table">
       <thead><tr><th>品目名</th><th>カラー</th><th style="text-align:right;">数量</th><th style="text-align:right;">単価</th><th style="text-align:right;">金額</th><th>備考</th></tr></thead>
       <tbody>
-        ${slip.rows.map(r=>`<tr>
-          <td>${esc(r.name)}</td>
-          <td>${esc(r.color)}</td>
-          <td style="text-align:right;">${r.qty}</td>
-          <td style="text-align:right;">${r.price?r.price.toLocaleString():''}</td>
-          <td style="text-align:right;">${r.amount?r.amount.toLocaleString():''}</td>
-          <td style="font-size:8pt;">${esc(r.memo||'')}</td>
-        </tr>`).join('')}
+        ${(()=>{
+          const dataRows = slip.rows.map(r=>`<tr>
+            <td>${esc(r.name)}</td>
+            <td>${esc(r.color)}</td>
+            <td style="text-align:right;">${r.qty}</td>
+            <td style="text-align:right;">${r.price?r.price.toLocaleString():''}</td>
+            <td style="text-align:right;">${r.amount?r.amount.toLocaleString():''}</td>
+            <td style="font-size:8pt;">${esc(r.memo||'')}</td>
+          </tr>`);
+          // 8行固定：空行で埋める
+          while(dataRows.length < 8) dataRows.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>');
+          return dataRows.join('');
+        })()}
         <tr style="border-top:1px solid #000;">
           <td colspan="2" style="text-align:right;font-weight:bold;">合計</td>
           <td style="text-align:right;font-weight:bold;">${totalQty}</td>
