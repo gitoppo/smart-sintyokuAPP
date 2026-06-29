@@ -943,7 +943,7 @@ function calcMaterialFromHistory(){
   // 指定日の発行済み納品書を集計
   const records = st.deliveryHistory.filter(r=>
     r.type !== 'checklist' &&
-    r.shippingDate === date &&
+    (r.shippingDate||'').startsWith(date) &&
     r.slips && r.slips.length > 0
   );
 
@@ -1003,7 +1003,7 @@ async function getTodaySlipCount(date){
     if(!shData || !shData.deliveryHistory) return 0;
     let count = 0;
     shData.deliveryHistory
-      .filter(r=> r.type !== 'checklist' && r.shippingDate === date)
+      .filter(r=> r.type !== 'checklist' && (r.shippingDate||'').startsWith(date))
       .forEach(r=>{
         // slipsが直接ある場合
         if(r.slips && r.slips.length > 0){
@@ -1177,7 +1177,7 @@ async function saveDeliveryRecord(slips,date,memo,type){
     id:'dh_'+Date.now(),
     timestamp:new Date().toISOString(),
     deviceName:settings.deviceName||'',
-    shippingDate:date,
+    shippingDate:date.slice(0,10),
     memo:memo||'',
     type:type,
     slips:slips,
@@ -1328,7 +1328,7 @@ function calcInvoice(){
   const records=st.deliveryHistory.filter(r=>
     r.type!=='checklist' &&
     r.shippingDate &&
-    r.shippingDate.slice(0,7)===target &&
+    (r.shippingDate||'').slice(0,7)===target &&
     r.slips && r.slips.length>0
   );
   if(records.length===0){
