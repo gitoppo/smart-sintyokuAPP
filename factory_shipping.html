@@ -1239,11 +1239,51 @@ function toggleHistory(i){
   document.getElementById('hb_'+i)?.classList.toggle('open');
 }
 
-function deleteRecord(id){
-  if(!confirm('この履歴を削除しますか？')) return;
-  st.deliveryHistory=st.deliveryHistory.filter(r=>r.id!==id);
-  saveLocalState(); renderHistory();
-  toast('削除しました');
+async function deleteRecord(id){
+  const record = st.deliveryHistory.find(r=>r.id===id);
+  if(!record) return;
+  const date = record.shippingDate?.slice(0,10)||'';
+  const type = record.type==='checklist'?'チェックリスト':'納品書';
+  const slipNos = (record.slips||[]).map(s=>s.slipNo).join('・');
+  const msg = '以下の履歴を削除しますか？\n\n種別: '+type+'\n出荷日: '+date+(slipNos?'\n伝票番号: '+slipNos:'')+'\n\nスプレッドシートからも削除されます。';
+  if(!confirm(msg)) return;
+
+  showLoading(true);
+  try{
+    // GASから削除
+    if(settings.gasUrl){
+      const res = await gasPost({action:'deleteShipping', id});
+      if(res && !res.ok){
+        toast('GAS削除エラー: '+res.error);
+        return;
+      }
+      // GASから最新の履歴を再取得して同期
+      const shData = await gasGet('getShipping');
+      if(shData && shData.deliveryHistory){
+        st.deliveryHistory = shData.deliveryHistory.map(r=>{
+          if(!r.slips && r.palletsJson){
+            try{
+              const pw = JSON.parse(r.palletsJson);
+              if(pw.slips) r.slips = pw.slips;
+              if(pw.palletsSnapshot) r.palletsSnapshot = pw.palletsSnapshot;
+            }catch(e){}
+          }
+          if(!r.slips) r.slips = [];
+          return r;
+        });
+      }
+    } else {
+      // GAS未設定の場合はローカルのみ削除
+      st.deliveryHistory = st.deliveryHistory.filter(r=>r.id!==id);
+    }
+    saveLocalState();
+    renderHistory();
+    toast('削除しました');
+  }catch(e){
+    toast('削除エラー: '+e.message);
+  }finally{
+    showLoading(false);
+  }
 }
 
 // ===== 編集モーダル =====
