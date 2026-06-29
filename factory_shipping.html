@@ -159,8 +159,18 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .slip-page-break{page-break-after:always;}
 
   .slip-divider{height:8mm;flex-shrink:0;position:relative;box-sizing:border-box;}
-  .slip-divider{height:8mm;flex-shrink:0;display:flex;align-items:center;}
-  .slip-cut-line{width:10mm;border-top:1px dashed #000;}
+  .slip-divider{display:none;}
+  .slip-unit{position:relative;}
+  /* 切り取り線：slip-unitの下端から8mm上の位置（padding-bottomで確保） */
+  .slip-unit-cut::after{
+    content:'✂';
+    position:absolute;
+    bottom:-4mm;
+    left:0;
+    font-size:8pt;
+    color:#000;
+    line-height:1;
+  }
   .delivery-slip{flex:1;padding:1.5mm 2.5mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
   .slip-title{font-size:10.5pt;font-weight:bold;text-align:center;margin-bottom:0.5mm;}
   .slip-info{display:flex;justify-content:space-between;font-size:8pt;margin-bottom:0.5mm;}
@@ -1274,7 +1284,9 @@ function printDelivery(grouped, existingRecord, startNo=1){
     return {slipNo,groupName:g.groupName,rows,subtotal,tax,total};
   });
 
-  const dividerHTML=`<div class="slip-divider"><div class="slip-cut-line"></div></div>`;
+  const dividerHTML=`<div style="height:0;overflow:visible;position:relative;">
+    <div style="position:absolute;top:-4mm;left:0;width:10mm;border-top:1px dashed #000;"></div>
+  </div>`;
   let printContent='';
   for(let i=0;i<slips.length;i+=3){
     const trio=slips.slice(i,i+3);
