@@ -1074,15 +1074,8 @@ async function openPrintDelivery(){
   finally{ showLoading(false); }
 
   // 確認ダイアログ
-  const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName).join('
-');
-  const msg = '以下の納品書を発行しますか？
-
-出荷日: '+date+'
-
-'+slipList+'
-
-発行すると履歴に保存されます。';
+  const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName).join('\n');
+  const msg = '以下の納品書を発行しますか？\n\n出荷日: '+date+'\n\n'+slipList+'\n\n発行すると履歴に保存されます。';
   if(!confirm(msg)) return;
 
   printDelivery(grouped, null, startNo);
