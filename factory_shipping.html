@@ -1061,15 +1061,31 @@ async function openPrintDelivery(){
   if(allRows.length===0){ toast('品目を登録してください'); return; }
   const grouped=groupRowsByGroup(allRows);
   const date=document.getElementById('shippingDate').value||today();
+
   showLoading(true);
+  let startNo=1;
   try{
-    const existingCount = await getTodaySlipCount(date);
-    printDelivery(grouped, null, existingCount + 1);
-  }catch(e){
-    printDelivery(grouped, null, 1);
-  }finally{
-    showLoading(false);
-  }
+    // GASから採番（重複防止）
+    if(settings.gasUrl){
+      const res = await gasPost({action:'getSlipNo', date, count:grouped.length});
+      if(res && res.ok) startNo = res.startNo;
+    }
+  }catch(e){ console.warn('採番エラー:', e); }
+  finally{ showLoading(false); }
+
+  // 確認ダイアログ
+  const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName).join('
+');
+  const msg = '以下の納品書を発行しますか？
+
+出荷日: '+date+'
+
+'+slipList+'
+
+発行すると履歴に保存されます。';
+  if(!confirm(msg)) return;
+
+  printDelivery(grouped, null, startNo);
 }
 
 function printDelivery(grouped, existingRecord, startNo=1){
