@@ -158,9 +158,9 @@ tr:nth-child(even) td{background:#f9f9f9;}
   }
   .slip-page-break{page-break-after:always;}
 
-  .slip-divider{height:0;overflow:visible;display:flex;align-items:center;justify-content:space-between;position:relative;}
-  .slip-divider-line{width:10mm;border-top:1px dashed #000;flex:none;}
-  .slip-divider-label{display:none;}
+  .slip-divider{height:8mm;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;position:relative;box-sizing:border-box;}
+  .slip-divider::before{content:'';position:absolute;top:50%;left:0;right:0;height:0;border-top:1px dashed #000;-webkit-mask:linear-gradient(to right,#000 10mm,transparent 10mm,transparent calc(100% - 10mm),#000 calc(100% - 10mm));mask:linear-gradient(to right,#000 10mm,transparent 10mm,transparent calc(100% - 10mm),#000 calc(100% - 10mm));}
+  .slip-divider-line{display:none;}
   .delivery-slip{flex:1;padding:1.5mm 2.5mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
   .slip-title{font-size:10.5pt;font-weight:bold;text-align:center;margin-bottom:0.5mm;}
   .slip-info{display:flex;justify-content:space-between;font-size:8pt;margin-bottom:0.5mm;}
