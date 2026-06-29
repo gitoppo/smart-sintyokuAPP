@@ -470,7 +470,8 @@ async function loadFromGas(){
         group:     String(it.group||'その他'),
         price:     parseFloat(it.price)||0,
         dispName:  String(it.dispName||''),
-        dispColor: String(it.dispColor||'')
+        dispColor: String(it.dispColor||''),
+        caseQty:   parseFloat(it.caseQty)||0
       }));
     }
     if(data && data.plans)    st.plans    = data.plans;
@@ -553,6 +554,16 @@ let _workSaveTimer=null;
 function debounceWorkSave(){
   clearTimeout(_workSaveTimer);
   _workSaveTimer = setTimeout(()=>{ saveShippingWork(); }, 2000);
+}
+
+// ===== ケース数計算 =====
+function caseLabel(item, qty){
+  if(!item || !item.caseQty || item.caseQty <= 0) return '';
+  const cases = qty / item.caseQty;
+  const whole = Math.floor(cases);
+  const rem = qty % item.caseQty;
+  if(rem === 0) return `<span style="color:#0f3460;font-size:11px;">${whole}ケース</span>`;
+  return `<span style="color:#0f3460;font-size:11px;">${whole}ケース+${rem}</span>`;
 }
 
 // ===== 計画ヘルパー =====
@@ -669,10 +680,15 @@ function openBs(groupName){
     st.pallets.forEach(p=>p.rows.forEach(r=>{ if(r.itemId==m.id) currentQty+=(parseInt(r.qty)||0); }));
     st.bara.forEach(r=>{ if(r.itemId==m.id) currentQty+=(parseInt(r.qty)||0); });
     return `<div class="bs-color-row">
-      <div class="bs-color-name">${esc(m.color||m.name)}</div>
+      <div style="flex:1;">
+        <div class="bs-color-name">${esc(m.color||m.name)}</div>
+        ${m.caseQty>0?`<div style="font-size:11px;color:#888;">1ケース=${m.caseQty}個</div>`:''}
+      </div>
       <div class="bs-adj" onclick="bsAdj('${esc(m.id)}',-1)">－</div>
-      <input class="bs-qty-input" type="number" min="0" id="bs-inp-${esc(m.id)}" value="0" placeholder="0">
+      <input class="bs-qty-input" type="number" min="0" id="bs-inp-${esc(m.id)}" value="0" placeholder="0"
+        oninput="bsUpdateCase('${esc(m.id)}',${m.caseQty||0},this.value)">
       <div class="bs-adj" onclick="bsAdj('${esc(m.id)}',1)">＋</div>
+      <div id="bs-case-${esc(m.id)}" style="min-width:60px;font-size:12px;color:#0f3460;text-align:right;"></div>
       ${currentQty>0?`<div style="font-size:11px;color:#27ae60;margin-left:4px;">登録済${currentQty}</div>`:''}
     </div>`;
   }).join('');
@@ -694,6 +710,18 @@ function bsAdj(itemId, delta){
   if(!inp) return;
   const v = Math.max(0, (parseInt(inp.value)||0) + delta);
   inp.value = v;
+  const item = st.itemMaster.find(m=>m.id==itemId);
+  bsUpdateCase(itemId, item?.caseQty||0, v);
+}
+
+function bsUpdateCase(itemId, caseQty, qty){
+  const el = document.getElementById('bs-case-'+itemId);
+  if(!el) return;
+  const q = parseInt(qty)||0;
+  if(!caseQty || caseQty<=0 || q<=0){ el.textContent=''; return; }
+  const whole = Math.floor(q/caseQty);
+  const rem = q % caseQty;
+  el.textContent = rem===0 ? whole+'ケース' : whole+'ケース+'+rem;
 }
 
 function bsAddToPallet(){
@@ -809,6 +837,8 @@ function renderPallets(){
             const label = item ? `${item.name}${item.color?' ('+item.color+')':''}` : '不明';
             return `<div class="palletRow">
               <div style="font-size:16px;font-weight:600;">${esc(label)}</div>
+    ${item&&item.caseQty>0?`<div style="font-size:11px;color:#0f3460;">${caseLabel(item,parseInt(r.qty)||0)}</div>`:''}
+              ${item&&item.caseQty>0?`<div style="font-size:11px;color:#0f3460;">${caseLabel(item,parseInt(r.qty)||0)}</div>`:''}
               <input type="number" min="0" placeholder="数量" value="${r.qty||''}"
                 style="font-size:16px;padding:8px 4px;text-align:center;"
                 onchange="onPalletChange(${pi},${ri},'qty',this.value)"
@@ -859,6 +889,7 @@ function renderBara(){
     const label = item ? `${item.name}${item.color?' ('+item.color+')':''}` : '不明';
     return `<div class="palletRow">
       <div style="font-size:16px;font-weight:600;">${esc(label)}</div>
+    ${item&&item.caseQty>0?`<div style="font-size:11px;color:#0f3460;">${caseLabel(item,parseInt(r.qty)||0)}</div>`:''}
       <input type="number" min="0" placeholder="数量" value="${r.qty||''}"
         style="font-size:16px;padding:8px 4px;text-align:center;"
         onchange="onBaraChange(${i},'qty',this.value)"
