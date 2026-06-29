@@ -1001,10 +1001,23 @@ async function getTodaySlipCount(date){
   try{
     const shData = await gasGet('getShipping');
     if(!shData || !shData.deliveryHistory) return 0;
-    // 指定日の納品書（checklist除く）のslips合計件数を取得
-    const count = shData.deliveryHistory
+    let count = 0;
+    shData.deliveryHistory
       .filter(r=> r.type !== 'checklist' && r.shippingDate === date)
-      .reduce((s,r)=> s + ((r.slips && r.slips.length) || 0), 0);
+      .forEach(r=>{
+        // slipsが直接ある場合
+        if(r.slips && r.slips.length > 0){
+          count += r.slips.length;
+          return;
+        }
+        // palletsJsonにslipsが入っている場合（GAS保存形式）
+        if(r.palletsJson){
+          try{
+            const pw = JSON.parse(r.palletsJson);
+            if(pw.slips && pw.slips.length > 0) count += pw.slips.length;
+          }catch(e){}
+        }
+      });
     return count;
   }catch(e){
     console.warn('件数取得エラー:', e);
