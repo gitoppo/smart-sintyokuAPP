@@ -1279,8 +1279,10 @@ function printDelivery(grouped, existingRecord, startNo=1){
   });
 
   const dividerHTML=`<div class="slip-divider">
-    <div class="slip-cut-top"><div class="slip-cut-line-white"></div><div class="slip-cut-line-white"></div></div>
-    <div class="slip-cut-bottom"><div class="slip-cut-line"></div><div class="slip-cut-line"></div></div>
+    <div class="slip-cut-top" style="top:0;"><div class="slip-cut-line"></div><div class="slip-cut-line"></div></div>
+    <div class="slip-cut-top" style="top:1px;"><div class="slip-cut-line-white"></div><div class="slip-cut-line-white"></div></div>
+    <div class="slip-cut-bottom" style="bottom:1px;"><div class="slip-cut-line-white"></div><div class="slip-cut-line-white"></div></div>
+    <div class="slip-cut-bottom" style="bottom:0;"><div class="slip-cut-line"></div><div class="slip-cut-line"></div></div>
   </div>`;
   let printContent='';
   for(let i=0;i<slips.length;i+=3){
