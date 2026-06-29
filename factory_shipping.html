@@ -1087,7 +1087,10 @@ function printDelivery(grouped, existingRecord, startNo=1){
 
   // slipsを生成（品目・数量・金額を記録）
   const slips=grouped.map((g,gi)=>{
-    const slipNo=autoSlipNo(date,gi,startNo);
+    // 再印刷時は既存のslipNoをそのまま使用
+    const slipNo = (existingRecord && existingRecord.slips[gi])
+      ? existingRecord.slips[gi].slipNo
+      : autoSlipNo(date,gi,startNo);
     const rows=g.rows.map(r=>({
       itemId: r.item.id,
       name:   r.item.name,
