@@ -92,6 +92,23 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .editSlipBody{padding:10px;}
 .editRow{display:grid;grid-template-columns:1fr 80px 32px;gap:6px;align-items:center;margin-bottom:6px;}
 
+/* ===== パレット行拡張 ===== */
+.pallet-row-ext{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;}
+.pallet-row-label{font-size:16px;font-weight:600;flex:1;min-width:0;}
+.pallet-row-sub{font-size:11px;color:#0f3460;}
+.pallet-row-case{font-size:13px;color:#0f3460;font-weight:600;min-width:50px;text-align:right;}
+.pallet-row-qty{width:80px;font-size:16px;padding:6px 4px;text-align:center;border:1px solid #ccc;border-radius:6px;}
+.pallet-row-qty.over{border-color:#e94560;background:#fff0f0;}
+.pallet-row-qty.under{border-color:#e67e22;background:#fff8f0;}
+.check-box{display:flex;align-items:center;gap:4px;}
+.check-adj{width:36px;height:36px;border-radius:8px;background:#e8f0fe;color:#0f3460;font-size:20px;font-weight:bold;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;flex-shrink:0;}
+.check-inp{width:60px;font-size:16px;text-align:center;border:2px solid #ccc;border-radius:6px;padding:6px 4px;}
+.check-inp.match{border-color:#27ae60;background:#f0fff4;}
+.check-inp.nomatch{border-color:#e94560;background:#fff0f0;}
+.pallet-total{background:#e8f0fe;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:600;color:#0f3460;margin-top:4px;text-align:right;}
+.pallet-warning{color:#e67e22;font-size:12px;margin-top:2px;}
+.pallet-error{color:#e94560;font-size:12px;margin-top:2px;}
+
 /* ===== 品目タイル ===== */
 .item-tile-grid{display:grid;gap:10px;padding:8px 0;}
 .item-tile{background:#fff;border:2px solid #ddd;border-radius:12px;padding:12px 8px;cursor:pointer;text-align:center;transition:border-color .15s,background .15s;-webkit-tap-highlight-color:transparent;user-select:none;}
@@ -580,6 +597,7 @@ function itemOptions(selectedId){
 
 // ===== 品目タイル =====
 let _bsGroup = null; // 現在開いているグループ名
+let _checkVals = {}; // 箱数チェック入力値 {itemId: 入力箱数}
 
 let _tileEditMode = false;
 let _hiddenTiles = new Set(JSON.parse(localStorage.getItem('hiddenTiles')||'[]'));
@@ -820,33 +838,101 @@ function onPalletChange(pIdx,rIdx,field,val){
   st.pallets[pIdx].rows[rIdx][field] = field==='qty'?(parseInt(val)||''):val;
   saveLocalState(); renderItemTiles(); renderMaterial(); debounceWorkSave();
 }
+function calcCases(item, qty){
+  if(!item||!item.caseQty||item.caseQty<=0||qty<=0) return {cases:0, rem:0, label:''};
+  const cases = Math.floor(qty/item.caseQty);
+  const rem = qty % item.caseQty;
+  const label = rem===0 ? cases+'箱' : cases+'箱+'+rem+'個';
+  return {cases, rem, label};
+}
+
+function onCheckAdj(itemId, delta){
+  const inp = document.getElementById('chk-'+itemId);
+  if(!inp) return;
+  const v = Math.max(0,(parseInt(inp.value)||0)+delta);
+  inp.value = v;
+  onCheckChange(itemId, v);
+}
+
+function onCheckChange(itemId, val){
+  _checkVals[itemId] = parseInt(val)||0;
+  // 一致・不一致のスタイル更新
+  const inp = document.getElementById('chk-'+itemId);
+  const expected = document.getElementById('chk-exp-'+itemId);
+  if(!inp||!expected) return;
+  const exp = parseInt(expected.dataset.cases)||0;
+  if(parseInt(val)===0){ inp.classList.remove('match','nomatch'); return; }
+  if(parseInt(val)===exp){ inp.classList.add('match'); inp.classList.remove('nomatch'); }
+  else { inp.classList.add('nomatch'); inp.classList.remove('match'); }
+}
+
 function renderPallets(){
   const el = document.getElementById('palletList');
   el.innerHTML = st.pallets.map((p,pi)=>{
     const validRows = p.rows.filter(r=>r.itemId && r.qty);
+    let totalCases = 0;
+    const rowsHTML = validRows.length===0
+      ? '<p style="color:#999;font-size:12px;padding:4px;">品目タイルから追加してください</p>'
+      : validRows.map((r,ri)=>{
+          const item = st.itemMaster.find(m=>m.id==r.itemId);
+          const label = item ? `${item.name}${item.color?' ('+item.color+')':''}` : '不明';
+          const qty = parseInt(r.qty)||0;
+          const rem = planRemaining(r.itemId);
+          const {cases, label:caseLabel_} = calcCases(item, qty);
+          totalCases += cases;
+
+          // 残数チェック
+          let qtyClass='', warning='';
+          if(rem!==null){
+            if(qty > rem) qtyClass='over';
+            else if(qty < rem) warning=`<div class="pallet-warning">⚠ 計画残数${rem}個に対して${rem-qty}個不足</div>`;
+          }
+
+          // 箱数チェック欄
+          const checkVal = _checkVals[r.itemId]||0;
+          const checkMatch = checkVal>0 && checkVal===cases;
+          const checkCls = checkVal===0?'':(checkMatch?'match':'nomatch');
+
+          return `<div class="pallet-row-ext">
+            <div style="flex:1;min-width:0;">
+              <div class="pallet-row-label">${esc(label)}</div>
+              ${item&&item.caseQty>0?`<div class="pallet-row-sub">1箱=${item.caseQty}個</div>`:''}
+              ${warning}
+            </div>
+            ${item&&item.caseQty>0?`
+            <div style="text-align:center;">
+              <div style="font-size:11px;color:#666;margin-bottom:2px;">箱数チェック</div>
+              <div class="check-box">
+                <button class="check-adj" onclick="onCheckAdj('${r.itemId}',-1)">－</button>
+                <input class="check-inp ${checkCls}" id="chk-${r.itemId}" type="number" min="0" value="${checkVal||''}"
+                  oninput="onCheckChange('${r.itemId}',this.value)">
+                <button class="check-adj" onclick="onCheckAdj('${r.itemId}',1)">＋</button>
+              </div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:11px;color:#666;margin-bottom:2px;">箱数</div>
+              <div class="pallet-row-case" id="chk-exp-${r.itemId}" data-cases="${cases}">${caseLabel_}</div>
+            </div>
+            `:''}
+            <div style="text-align:center;">
+              <div style="font-size:11px;color:#666;margin-bottom:2px;">個数</div>
+              <input type="number" min="0" placeholder="0" value="${r.qty||''}"
+                class="pallet-row-qty ${qtyClass}"
+                onchange="onPalletChange(${pi},${ri},'qty',this.value)"
+                oninput="onPalletChange(${pi},${ri},'qty',this.value)">
+            </div>
+            <button class="btn-danger btn-sm" onclick="removePalletRowByItemId(${pi},'${r.itemId}')">✕</button>
+          </div>`;
+        }).join('');
+
     return `
     <div class="palletBlock">
       <div class="palletHeader">📦 パレット ${pi+1}
         <button class="btn-danger btn-sm" onclick="removePallet(${pi})">✕ 削除</button>
       </div>
       <div class="palletBody">
-        ${validRows.length===0
-          ? '<p style="color:#999;font-size:12px;padding:4px;">品目タイルから追加してください</p>'
-          : validRows.map((r,ri)=>{
-            const item = st.itemMaster.find(m=>m.id==r.itemId);
-            const label = item ? `${item.name}${item.color?' ('+item.color+')':''}` : '不明';
-            return `<div class="palletRow">
-              <div style="font-size:16px;font-weight:600;">${esc(label)}</div>
-    ${item&&item.caseQty>0?`<div style="font-size:11px;color:#0f3460;">${caseLabel(item,parseInt(r.qty)||0)}</div>`:''}
-              ${item&&item.caseQty>0?`<div style="font-size:11px;color:#0f3460;">${caseLabel(item,parseInt(r.qty)||0)}</div>`:''}
-              <input type="number" min="0" placeholder="数量" value="${r.qty||''}"
-                style="font-size:16px;padding:8px 4px;text-align:center;"
-                onchange="onPalletChange(${pi},${ri},'qty',this.value)"
-                oninput="onPalletChange(${pi},${ri},'qty',this.value)">
-              <button class="btn-danger btn-sm" onclick="removePalletRowByItemId(${pi},'${r.itemId}')">✕</button>
-            </div>`;
-          }).join('')
-        }
+        ${rowsHTML}
+        ${totalCases>0?`<div class="pallet-total">合計箱数: ${totalCases}箱</div>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1059,13 +1145,61 @@ async function getTodaySlipCount(date){
 async function openPrintDelivery(){
   const allRows=collectAllRows();
   if(allRows.length===0){ toast('品目を登録してください'); return; }
+
+  showLoading(true);
+  // ①発行前に最新データを再読み込み（残数を最新化）
+  try{
+    if(settings.gasUrl){
+      const data = await gasGet('getAll');
+      if(data && data.plans)    st.plans    = data.plans;
+      if(data && data.progress) st.progress = data.progress;
+      saveLocalState();
+    }
+  }catch(e){ console.warn('データ再読み込みエラー:', e); }
+  finally{ showLoading(false); }
+
+  // ②残数超過チェック（ブロック）
+  const overItems = [];
+  st.pallets.forEach(p=>p.rows.forEach(r=>{
+    if(!r.itemId||!r.qty) return;
+    const rem = planRemaining(r.itemId);
+    const item = st.itemMaster.find(m=>m.id==r.itemId);
+    if(rem!==null && parseInt(r.qty)>rem){
+      overItems.push(`${item?.name||''}${item?.color?' ('+item.color+')':''}: 入力${r.qty}個 > 残数${rem}個`);
+    }
+  }));
+  if(overItems.length>0){
+    alert('以下の品目が計画残数を超えています。修正してください。\n\n'+overItems.join('\n'));
+    return;
+  }
+
+  // ③箱数チェック不一致チェック（ブロック）
+  const unchecked = [], nomatch = [];
+  st.pallets.forEach(p=>p.rows.forEach(r=>{
+    if(!r.itemId||!r.qty) return;
+    const item = st.itemMaster.find(m=>m.id==r.itemId);
+    if(!item||!item.caseQty||item.caseQty<=0) return;
+    const expectedCases = Math.floor((parseInt(r.qty)||0)/item.caseQty);
+    if(expectedCases===0) return;
+    const checkVal = _checkVals[r.itemId]||0;
+    const label = `${item.name}${item.color?' ('+item.color+')':''}`;
+    if(checkVal===0) unchecked.push(label+`: ${expectedCases}箱`);
+    else if(checkVal!==expectedCases) nomatch.push(label+`: チェック${checkVal}箱 ≠ 登録${expectedCases}箱`);
+  }));
+  if(unchecked.length>0||nomatch.length>0){
+    let msg2 = '箱数チェックが完了していません。\n\n';
+    if(unchecked.length>0) msg2 += '【未チェック】\n'+unchecked.join('\n')+'\n\n';
+    if(nomatch.length>0) msg2 += '【不一致】\n'+nomatch.join('\n');
+    alert(msg2);
+    return;
+  }
+
   const grouped=groupRowsByGroup(allRows);
   const date=document.getElementById('shippingDate').value||today();
 
   showLoading(true);
   let startNo=1;
   try{
-    // GASから採番（重複防止）
     if(settings.gasUrl){
       const res = await gasPost({action:'getSlipNo', date, count:grouped.length});
       if(res && res.ok) startNo = res.startNo;
@@ -1073,9 +1207,21 @@ async function openPrintDelivery(){
   }catch(e){ console.warn('採番エラー:', e); }
   finally{ showLoading(false); }
 
-  // 確認ダイアログ
+  // ④確認ダイアログ（計画残数未満の警告付き）
+  const underItems = [];
+  st.pallets.forEach(p=>p.rows.forEach(r=>{
+    if(!r.itemId||!r.qty) return;
+    const rem = planRemaining(r.itemId);
+    const item = st.itemMaster.find(m=>m.id==r.itemId);
+    if(rem!==null && parseInt(r.qty)<rem && parseInt(r.qty)>0){
+      underItems.push(`${item?.name||''}${item?.color?' ('+item.color+')':''}: 入力${r.qty}個（残${rem}個）`);
+    }
+  }));
+
   const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName).join('\n');
-  const msg = '以下の納品書を発行しますか？\n\n出荷日: '+date+'\n\n'+slipList+'\n\n発行すると履歴に保存されます。';
+  let msg = '以下の納品書を発行しますか？\n\n出荷日: '+date+'\n\n'+slipList;
+  if(underItems.length>0) msg += '\n\n⚠ 以下の品目は計画残数より少ない数量です:\n'+underItems.join('\n');
+  msg += '\n\n発行すると履歴に保存されます。';
   if(!confirm(msg)) return;
 
   printDelivery(grouped, null, startNo);
