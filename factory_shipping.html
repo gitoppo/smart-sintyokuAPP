@@ -144,13 +144,20 @@ tr:nth-child(even) td{background:#f9f9f9;}
   /* 納品書3連：A4をgridで均等3分割 */
   .slip-page{
     width:100%;
-    display:grid;
-    grid-template-rows:1fr 5mm 1fr 5mm 1fr;
     height:277mm;
+    box-sizing:border-box;
+    display:flex;
+    flex-direction:column;
+  }
+  .slip-unit{
+    flex:1;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
     box-sizing:border-box;
   }
   .slip-page-break{page-break-after:always;}
-  .slip-unit{overflow:hidden;display:flex;flex-direction:column;box-sizing:border-box;}
+
   .slip-divider{display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;}
   .slip-divider-line{width:10mm;border-top:1px dashed #000;flex:none;}
   .slip-divider-label{display:none;}
