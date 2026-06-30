@@ -2546,7 +2546,7 @@ const Cloud = {
       return await r.json();
     } catch(e) { return null; }
   },
-  async post(payload, cb, errCb) {
+  async post(payload, cb, errCb, _retried) {
     if (!gasUrl) { if (errCb) errCb('No GAS URL'); return; }
     try {
       const r = await fetch(`${gasUrl}?v=${Date.now()}`, {
@@ -2556,7 +2556,14 @@ const Cloud = {
       });
       const d = await r.json();
       if (d.ok && cb) cb(d);
-      else if (!d.ok && errCb) errCb(d.error);
+      else if (!d.ok) {
+        // サーバー混雑（ロックタイムアウト）の場合、1回だけ自動リトライ
+        if (!_retried && d.error && String(d.error).includes('lock timeout')) {
+          await new Promise(res => setTimeout(res, 1500));
+          return this.post(payload, cb, errCb, true);
+        }
+        if (errCb) errCb(d.error);
+      }
     } catch(e) { if (errCb) errCb(e.message); }
   },
   savePlansProgress(cb, errCb) {
