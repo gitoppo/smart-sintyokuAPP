@@ -1314,7 +1314,24 @@ function renderStockSheetBody(g) {
         onchange="stockSetQty('${itemId}',this.value)">
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',1)">＋</button>
     </div>`;
-  }).join('');
+  }).join('') + `
+    <div style="padding:16px 4px 4px">
+      <button class="btn-sm btn-danger" onclick="askDeleteStockGroup('${esc(g.name)}')" style="width:100%;padding:10px;font-size:13px;font-weight:600">
+        🗑 このストック品目を削除
+      </button>
+    </div>`;
+}
+
+function askDeleteStockGroup(groupName) {
+  if (!confirm(`「${groupName}」のストックを削除しますか？\n入力した数量も全て消えます。`)) return;
+  st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
+    if (st.stock) delete st.stock[it.id];
+  });
+  closeStockSheet();
+  saveLocal();
+  debouncedStockSave();
+  renderStock();
+  showToast(`🗑 「${groupName}」のストックを削除しました`);
 }
 
 function openStockSheet(groupName) {
