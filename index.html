@@ -300,8 +300,8 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
         ・品目名＋カラーが品目マスターに登録済みであること<br>
         ・ヘッダー行は自動スキップ
       </div>
-      <!-- 上書き固定 -->
-      <div style="margin-bottom:10px;font-size:12px;color:var(--muted)">同一品目＋カラーの未完了を更新・数量0はスキップ（インポート前に自動バックアップされます）</div>
+      <!-- 完全置換固定 -->
+      <div style="margin-bottom:10px;font-size:12px;color:#fca5a5;font-weight:600">⚠️ CSVの内容で計画・進捗を総入れ替えします（旧データは全て削除されます／インポート前に自動バックアップ）</div>
       <div class="flex gap8" style="flex-wrap:wrap">
         <label style="flex:1;min-width:160px">
           <input type="file" id="plan-csv-file" accept=".csv,.xlsx" onchange="importPlanCsv(this)"
@@ -1275,7 +1275,6 @@ function togglePlanForm() {
 }
 
 // 数量0上書き確認待ちバッファ（確認ダイアログ用）
-let _csvPendingZeroOverwrite = [];
 
 function importPlanCsv(input) {
   const file = input.files[0];
@@ -1283,7 +1282,6 @@ function importPlanCsv(input) {
   const isXlsx = file.name.toLowerCase().endsWith('.xlsx');
   const reader = new FileReader();
   reader.onload = e => {
-    _csvPendingZeroOverwrite = [];
     let csvText = '';
     if (isXlsx) {
       // ExcelをCSVテキストに変換して共通処理へ
@@ -1307,7 +1305,7 @@ function importPlanCsv(input) {
       csvText = e.target.result;
     }
     _backupPlansProgress();
-    _applyPlanCsv(csvText, false);
+    _applyPlanCsv(csvText);
     input.value = '';
   };
   if (isXlsx) {
@@ -1345,27 +1343,13 @@ function undoPlansImport() {
   showToast('↩️ インポート前の状態に戻しました');
 }
 
-// forceZero=true のとき _csvPendingZeroOverwrite を強制適用
-function _applyPlanCsv(csvText, forceZero) {
+// 計画CSVインポート（完全置換：CSVの内容で計画・進捗を総入れ替え）
+function _applyPlanCsv(csvText) {
   const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
   const resultEl = document.getElementById('plan-csv-result');
-  const importMode = 'overwrite'; // 上書き固定
-  let added = 0, updated = 0, skipped = [], zeroWithProgress = [], rowNum = 0;
-
-  // forceZero時は保留リストをそのまま適用
-  if (forceZero) {
-    _csvPendingZeroOverwrite.forEach(({ existing, qty, date, memo, priority }) => {
-      existing.qty      = qty;
-      existing.date     = date;
-      existing.memo     = memo;
-      existing.priority = priority;
-      added++;
-    });
-    _csvPendingZeroOverwrite = [];
-    _showCsvResult(resultEl, 0, added, [], []);
-    if (added > 0) { saveLocal(); Cloud.savePlansProgress(null, null); renderAll(); showToast(`📂 計画を${added}件上書きしました`); }
-    return;
-  }
+  let added = 0, skipped = [], rowNum = 0;
+  const newPlans = [];
+  const newProgress = {};
 
   lines.forEach((line, idx) => {
     // ヘッダー行を自動スキップ
@@ -1392,7 +1376,8 @@ function _applyPlanCsv(csvText, forceZero) {
       skipped.push(`行${rowNum}: 数量が空です`);
       return;
     }
-    const qty = toNum(rawQty); // 0を許容
+    const qty = toNum(rawQty);
+    if (qty === 0) return; // 数量0は計画なしとして除外
 
     const date = sanitizeDateStr(rawDate);
     if (!date) {
@@ -1403,97 +1388,37 @@ function _applyPlanCsv(csvText, forceZero) {
     const memo     = rawMemo || '';
     const priority = rawPri === '1' || rawPri === 'true';
 
-    if (importMode === 'overwrite') {
-      // 同一itemIdを持つ計画を全て取得し、未完了のものを検索
-      const existingList = st.plans.filter(p => p.itemId === item.id);
-      const existing = existingList.find(p => {
-        const prog = st.progress[p.id] || { postDone: {} };
-        const postTotal = calcPostTotal(prog.postDone);
-        // 完了済み（数量>0かつ後工程合計>=数量）はスキップ
-        if (toNum(p.qty) > 0 && postTotal >= toNum(p.qty)) return false;
-        return true; // 未完了（数量0含む）
-      });
-
-      if (existing && qty === 0) {
-        // 数量0 × 進捗あり → 確認待ちバッファへ
-        const prog = st.progress[existing.id] || { postDone: {} };
-        const postTotal = calcPostTotal(prog.postDone);
-        if (postTotal > 0) {
-          zeroWithProgress.push({ name: rawName, color: rawColor, postTotal, existing, qty, date, memo, priority });
-          _csvPendingZeroOverwrite.push({ existing, qty, date, memo, priority });
-          return;
-        }
-        // 進捗0なら警告なしで上書き
-        existing.qty = qty; existing.date = date; existing.memo = memo; existing.priority = priority;
-        updated++;
-      } else if (existing) {
-        existing.qty = qty; existing.date = date; existing.memo = memo; existing.priority = priority;
-        updated++;
-      } else {
-        // 既存なし → 新規追加
-        const plan = { id: genId('p'), itemId: item.id, qty, date, memo, priority };
-        st.plans.push(plan);
-        st.progress[plan.id] = { preDone: 0, postDone: {} };
-        added++;
-      }
-    } else {
-      // 追記モード
-      const plan = { id: genId('p'), itemId: item.id, qty, date, memo, priority };
-      st.plans.push(plan);
-      st.progress[plan.id] = { preDone: 0, postDone: {} };
-      added++;
-    }
+    const plan = { id: genId('p'), itemId: item.id, qty, date, memo, priority };
+    newPlans.push(plan);
+    newProgress[plan.id] = { preDone: 0, postDone: {} };
+    added++;
   });
 
-  _showCsvResult(resultEl, added, updated, skipped, zeroWithProgress);
-  if (added > 0 || updated > 0) { saveLocal(); Cloud.savePlansProgress(null, null); renderAll(); showToast(`📂 新規${added}件追加・${updated}件上書きしました`); }
+  // 完全置換：旧計画・旧進捗をすべて新データで入れ替え
+  st.plans    = newPlans;
+  st.progress = newProgress;
+
+  _showCsvResult(resultEl, added, skipped);
+  saveLocal();
+  Cloud.savePlansProgress(null, null);
+  renderAll();
+  showToast(`📂 計画を${added}件で総入れ替えしました（旧データは削除されました）`);
 }
 
-function _showCsvResult(resultEl, added, updated, skipped, zeroWithProgress) {
+function _showCsvResult(resultEl, added, skipped) {
   let html = '';
-  if (updated > 0) {
-    html += `<div style="color:var(--b);font-weight:700">✏️ ${updated}件を上書きしました</div>`;
-  }
   if (added > 0) {
-    html += `<div style="color:var(--g);font-weight:700">✅ ${added}件を新規追加しました</div>`;
-  }
-  if (zeroWithProgress.length > 0) {
-    html += `<div style="color:var(--y);font-weight:700;margin-top:8px">⚠️ 以下の計画は進捗データがあります。数量0で上書きしますか？</div>`;
-    html += zeroWithProgress.map(z =>
-      `<div style="color:var(--muted);padding-left:8px">・${esc(z.name)} ${esc(z.color)}（進捗: ${z.postTotal}個）</div>`
-    ).join('');
-    html += `<div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn-sm" style="background:#450a0a;border-color:var(--r);color:#fca5a5"
-        onclick="confirmZeroOverwrite()">数量0で上書きする</button>
-      <button class="btn-sm" onclick="cancelZeroOverwrite()">キャンセル</button>
-    </div>`;
+    html += `<div style="color:var(--g);font-weight:700">✅ ${added}件の計画で総入れ替えしました</div>`;
   }
   if (skipped.length > 0) {
     html += `<div style="color:var(--y);margin-top:8px;font-weight:700">⚠️ スキップ ${skipped.length}件</div>`;
     html += skipped.map(s => `<div style="color:var(--muted);padding-left:8px">・${esc(s)}</div>`).join('');
   }
-  if (added === 0 && updated === 0 && skipped.length === 0 && zeroWithProgress.length === 0) {
+  if (added === 0 && skipped.length === 0) {
     html = '<div style="color:var(--muted)">有効なデータがありませんでした</div>';
   }
   resultEl.innerHTML = html;
 }
-
-function confirmZeroOverwrite() {
-  if (!_csvPendingZeroOverwrite.length) return;
-  _applyPlanCsv('', true);
-  document.getElementById('plan-csv-result').innerHTML =
-    `<div style="color:var(--g);font-weight:700">✅ 数量0で上書きしました（${_csvPendingZeroOverwrite.length}件処理済）</div>`;
-}
-
-function cancelZeroOverwrite() {
-  _csvPendingZeroOverwrite = [];
-  const resultEl = document.getElementById('plan-csv-result');
-  const existing = resultEl.innerHTML;
-  // ダイアログ部分だけ除去してキャンセルメッセージ追加
-  resultEl.innerHTML = existing.replace(/<div style="display:flex.*?<\/div>\s*<\/div>/s, '') +
-    '<div style="color:var(--muted);margin-top:4px">数量0の上書きをキャンセルしました</div>';
-}
-
 function downloadPlanCsvTemplate() {
   if (!st.itemMaster.length) {
     alert('品目マスターが登録されていません。⑥品目タブでCSVをインポートしてください。');
@@ -2266,8 +2191,7 @@ function importCsv(input) {
         group:    String(cols[7]  || 'その他'),
         price:    parseFloat(cols[8]) || 0,
         dispName:  String(cols[9]  || ''),
-        dispColor: String(cols[10] || ''),
-        caseQty:   parseFloat(cols[11]) || 0
+        dispColor: String(cols[10] || '')
       });
     });
     st.itemMaster = items;
