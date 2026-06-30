@@ -201,6 +201,7 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
   <button class="tab-btn active" onclick="switchTab('progress')">①進捗</button>
   <button class="tab-btn" onclick="switchTab('personal')">②個人</button>
   <button class="tab-btn" onclick="switchTab('plans')">③計画</button>
+  <button class="tab-btn" onclick="switchTab('stock')">📦ストック</button>
   <button class="tab-btn" onclick="switchTab('attend')">④勤怠</button>
   <button class="tab-btn" onclick="switchTab('shift')">⑤シフト</button>
   <button class="tab-btn" onclick="switchTab('items')">⑥品目</button>
@@ -332,6 +333,41 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
       <div class="p2-sheet-close" onclick="closeP3Sheet()">✕</div>
     </div>
     <div id="p3-sheet-body"></div>
+  </div>
+</div>
+
+<!-- ストックパネル -->
+<div id="panel-stock" class="panel" style="padding:8px">
+  <div class="f12 text-muted" style="padding:8px 6px 12px;line-height:1.6">
+    📦 本番計画が確定する前の先行生産分を記録するタブです。計画とは連動しません。
+  </div>
+  <div style="margin-bottom:10px">
+    <button class="btn-sm" onclick="openStockPicker()" style="width:100%;padding:12px;font-size:14px;font-weight:700;border-color:#d97706;color:#fbbf24;background:#2a1a05">
+      ＋ ストック品目を追加
+    </button>
+  </div>
+  <!-- タイルグリッド -->
+  <div id="stock-tile-grid" class="p2-grid"></div>
+  <!-- ボトムシートオーバーレイ -->
+  <div id="stock-overlay" class="p2-sheet-overlay" onclick="closeStockSheet()"></div>
+  <!-- ボトムシート本体 -->
+  <div id="stock-sheet" class="p2-sheet">
+    <div class="p2-sheet-handle"></div>
+    <div class="p2-sheet-header">
+      <div id="stock-sheet-title" class="p2-sheet-title"></div>
+      <div class="p2-sheet-close" onclick="closeStockSheet()">✕</div>
+    </div>
+    <div id="stock-sheet-body"></div>
+  </div>
+  <!-- 品目選択ボトムシート -->
+  <div id="stock-picker-overlay" class="p2-sheet-overlay" onclick="closeStockPicker()"></div>
+  <div id="stock-picker-sheet" class="p2-sheet">
+    <div class="p2-sheet-handle"></div>
+    <div class="p2-sheet-header">
+      <div class="p2-sheet-title">品目を選択</div>
+      <div class="p2-sheet-close" onclick="closeStockPicker()">✕</div>
+    </div>
+    <div id="stock-picker-body"></div>
   </div>
 </div>
 
@@ -510,7 +546,8 @@ const DEFAULT_STATE = {
   plans: [],
   progress: {},
   baseShift: [],
-  weeklyAttend: {}
+  weeklyAttend: {},
+  stock: {}
 };
 
 let st = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -555,12 +592,13 @@ window.addEventListener('DOMContentLoaded', () => {
 // タブ切替
 // ============================================================
 function switchTab(tab) {
-  const tabs = ['progress','personal','plans','attend','shift','items','settings'];
+  const tabs = ['progress','personal','plans','stock','attend','shift','items','settings'];
   tabs.forEach((t,i) => {
     document.querySelectorAll('.tab-btn')[i].classList.toggle('active', t === tab);
     document.getElementById('panel-' + t).classList.toggle('active', t === tab);
   });
   if (tab === 'personal') renderPersonal();
+  if (tab === 'stock') renderStock();
   if (tab === 'attend') {
     // 選択日が表示週内になければ補正
     const { days: dispDays } = getDisplayCycle();
@@ -585,6 +623,7 @@ function renderAll() {
   renderWeekHeader();
   renderAttendDay();
   renderShift();
+  renderStock();
 }
 
 // ============================================================
@@ -1210,6 +1249,166 @@ function closeP2Sheet() {
   _p2OpenGroup = null;
   document.getElementById('p2-sheet').classList.remove('open');
   document.getElementById('p2-overlay').classList.remove('open');
+}
+
+// ============================================================
+// ストックタブ（計画とは独立した品目別ストック数量）
+// ============================================================
+let _stockOpenGroup = null;
+
+function buildStockGroups() {
+  // 品目マスター順・グループ名（表示名）単位でまとめる
+  // 「追加済み」＝グループ内に1つでもst.stockにキーが存在する品目があるグループを表示
+  const map = {};
+  st.itemMaster.forEach(item => {
+    const groupName = dispN(item);
+    if (!map[groupName]) map[groupName] = { name: groupName, items: [] };
+    const hasKey = st.stock && Object.prototype.hasOwnProperty.call(st.stock, item.id);
+    const qty = toNum(st.stock[item.id]);
+    map[groupName].items.push({ item, colorName: dispC(item), qty, hasKey });
+  });
+  return Object.values(map).filter(g => g.items.some(r => r.hasKey));
+}
+
+function renderStock() {
+  const grid = document.getElementById('stock-tile-grid');
+  if (!grid) return;
+
+  const groups = buildStockGroups();
+  if (!groups.length) {
+    grid.innerHTML = '<div class="text-muted f12" style="padding:20px;text-align:center;grid-column:1/-1">ストックがありません</div>';
+    return;
+  }
+
+  grid.innerHTML = groups.map(g => {
+    const totalQty = g.items.reduce((s, r) => s + r.qty, 0);
+    return `<div class="p2-tile" onclick="openStockSheet('${esc(g.name)}')">
+      <div class="p2-tile-name">${esc(g.name)} <span style="font-size:13px;color:#fbbf24;font-weight:700">［ストック］</span></div>
+      <div style="margin-top:10px;text-align:center">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:3px">ストック数</div>
+        <div style="font-size:42px;font-weight:700;color:#fbbf24;line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalQty).length >= 3 ? 0.7 : 1})">${totalQty}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (_stockOpenGroup) {
+    const g = groups.find(gg => gg.name === _stockOpenGroup);
+    if (g) renderStockSheetBody(g);
+  }
+}
+
+function renderStockSheetBody(g) {
+  document.getElementById('stock-sheet-title').innerHTML = `${esc(g.name)} <span style="font-size:13px;color:#fbbf24;font-weight:700">［ストック］</span>`;
+  const body = document.getElementById('stock-sheet-body');
+
+  const focused = document.activeElement;
+  if (focused && focused.classList.contains('stock-num-input')) return;
+
+  body.innerHTML = g.items.map(r => {
+    const itemId = r.item.id;
+    return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center">
+      <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}</div>
+      <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',-1)">－</button>
+      <input class="p2-num-input stock-num-input" type="number" id="stock-inp-${itemId}"
+        value="${r.qty}" min="0"
+        onchange="stockSetQty('${itemId}',this.value)">
+      <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',1)">＋</button>
+    </div>`;
+  }).join('');
+}
+
+function openStockSheet(groupName) {
+  const groups = buildStockGroups();
+  const g = groups.find(gg => gg.name === groupName);
+  if (!g) return;
+  _stockOpenGroup = groupName;
+  renderStockSheetBody(g);
+  document.getElementById('stock-overlay').classList.add('open');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.getElementById('stock-sheet').classList.add('open');
+    });
+  });
+}
+
+function closeStockSheet() {
+  _stockOpenGroup = null;
+  document.getElementById('stock-sheet').classList.remove('open');
+  document.getElementById('stock-overlay').classList.remove('open');
+  renderStock();
+}
+
+function stockAdjust(itemId, delta) {
+  const inp = document.getElementById('stock-inp-' + itemId);
+  const current = inp ? toNum(inp.value) : 0;
+  const newVal = Math.max(0, current + delta);
+  if (inp) inp.value = newVal;
+  stockSetQty(itemId, newVal);
+}
+
+function stockSetQty(itemId, val) {
+  if (!st.stock) st.stock = {};
+  st.stock[itemId] = Math.max(0, toNum(val));
+  saveLocal();
+  debouncedStockSave();
+  renderStock();
+}
+
+let _stockSaveTimer = null;
+function debouncedStockSave() {
+  clearTimeout(_stockSaveTimer);
+  _stockSaveTimer = setTimeout(() => { Cloud.saveStock(null, null); }, 600);
+}
+
+// 「＋ストック品目を追加」ピッカー
+function openStockPicker() {
+  const body = document.getElementById('stock-picker-body');
+  if (!st.itemMaster.length) {
+    body.innerHTML = '<div class="text-muted f13" style="padding:16px">品目マスターが登録されていません</div>';
+  } else {
+    // グループ名（表示名）単位でまとめる
+    const map = {};
+    st.itemMaster.forEach(item => {
+      const gn = dispN(item);
+      if (!map[gn]) map[gn] = [];
+      map[gn].push(item);
+    });
+    // 既にタイル表示中（=グループ内の全品目がst.stockにキーとして存在）のグループは除外
+    const available = Object.keys(map).filter(gn =>
+      !map[gn].every(it => st.stock && Object.prototype.hasOwnProperty.call(st.stock, it.id))
+    );
+    if (!available.length) {
+      body.innerHTML = '<div class="text-muted f13" style="padding:16px">追加できる品目がありません（全て追加済みです）</div>';
+    } else {
+      body.innerHTML = available.map(gn =>
+        `<div onclick="addStockGroup('${esc(gn)}')" style="padding:14px 16px;border-bottom:1px solid #0d1520;font-size:16px;font-weight:600;cursor:pointer">${esc(gn)}</div>`
+      ).join('');
+    }
+  }
+  document.getElementById('stock-picker-overlay').classList.add('open');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.getElementById('stock-picker-sheet').classList.add('open');
+    });
+  });
+}
+
+function closeStockPicker() {
+  document.getElementById('stock-picker-sheet').classList.remove('open');
+  document.getElementById('stock-picker-overlay').classList.remove('open');
+}
+
+function addStockGroup(groupName) {
+  if (!st.stock) st.stock = {};
+  // グループ内の品目に stock キーを作成（0で初期化、未設定のみ）
+  st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
+    if (!(it.id in st.stock)) st.stock[it.id] = 0;
+  });
+  closeStockPicker();
+  saveLocal();
+  debouncedStockSave();
+  renderStock();
+  openStockSheet(groupName);
 }
 
 function p2Adjust(planId, delta) {
@@ -2320,6 +2519,9 @@ const Cloud = {
   saveOperationLog(log) {
     if (!gasUrl) return;
     this.post({ action:'saveOperationLog', log }, null, null);
+  },
+  saveStock(cb, errCb) {
+    this.post({ action:'saveStock', stock: st.stock }, cb, errCb);
   }
 };
 
@@ -2402,6 +2604,14 @@ function applyCloudData(json, forceShiftAttend) {
     if (Array.isArray(json.shiftAttend.baseShift)) st.baseShift = json.shiftAttend.baseShift;
     if (json.shiftAttend.weeklyAttend && typeof json.shiftAttend.weeklyAttend === 'object') {
       st.weeklyAttend = json.shiftAttend.weeklyAttend;
+    }
+  }
+  if (json.stock && typeof json.stock === 'object') {
+    // ストック入力欄にフォーカス中は上書きしない
+    const focused = document.activeElement;
+    if (!(focused && focused.classList.contains('stock-num-input'))) {
+      st.stock = {};
+      Object.entries(json.stock).forEach(([k,v]) => { st.stock[k] = toNum(v); });
     }
   }
 }
