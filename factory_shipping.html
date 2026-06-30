@@ -160,7 +160,16 @@ tr:nth-child(even) td{background:#f9f9f9;}
 
   .slip-divider{height:8mm;flex-shrink:0;position:relative;box-sizing:border-box;}
   .slip-divider{display:none;}
-  .slip-unit{border-top:1px dashed #000;border-bottom:1px dashed #000;}
+  .slip-unit{position:relative;}
+  .slip-unit::before,.slip-unit::after{
+    content:'';
+    position:absolute;
+    left:0;right:0;
+    height:1px;
+    background:linear-gradient(to right, #000 5mm, transparent 5mm, transparent calc(100% - 5mm), #000 calc(100% - 5mm));
+  }
+  .slip-unit::before{top:0;}
+  .slip-unit::after{bottom:0;}
   .delivery-slip{flex:1;padding:1.5mm 2.5mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
   .slip-title{font-size:10.5pt;font-weight:bold;text-align:center;margin-bottom:0.5mm;}
   .slip-info{display:flex;justify-content:space-between;font-size:8pt;margin-bottom:0.5mm;}
