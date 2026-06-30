@@ -706,7 +706,8 @@ function getCurrentCycle() {
 }
 
 function toNum(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
-function genId(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
+let _genIdCounter = 0;
+function genId(prefix) { return prefix + Date.now().toString(36) + (_genIdCounter++).toString(36) + Math.random().toString(36).slice(2,6); }
 // 表示名・表示カラー取得（dispName/dispColorが空なら正式名を使用）
 function dispN(item) { return (item && item.dispName)  ? item.dispName  : (item ? item.name  : ''); }
 function dispC(item) { return (item && item.dispColor) ? item.dispColor : (item ? item.color : ''); }
@@ -1252,20 +1253,24 @@ function closeP2Sheet() {
 }
 
 // ============================================================
-// ストックタブ（計画とは独立した品目別ストック数量）
+// ストックタブ（計画とは独立した品目別ストック数量／端末別管理）
 // ============================================================
 let _stockOpenGroup = null;
 
+// st.stock[itemId] = { "端末名_YYYY-MM-DD": 数値, ... }  （②個人タブのpostDoneと同形式）
 function buildStockGroups() {
-  // 品目マスター順・グループ名（表示名）単位でまとめる
-  // 「追加済み」＝グループ内に1つでもst.stockにキーが存在する品目があるグループを表示
+  const dn = st.deviceName;
+  const today = todayStr();
   const map = {};
   st.itemMaster.forEach(item => {
     const groupName = dispN(item);
     if (!map[groupName]) map[groupName] = { name: groupName, items: [] };
-    const hasKey = st.stock && Object.prototype.hasOwnProperty.call(st.stock, item.id);
-    const qty = toNum(st.stock[item.id]);
-    map[groupName].items.push({ item, colorName: dispC(item), qty, hasKey });
+    const entry = (st.stock && st.stock[item.id]) || null;
+    const hasKey = !!entry; // このグループがタイル追加済みかどうかの判定に使用
+    const totalVal = entry ? calcPostTotal(entry) : 0;
+    const dayKey = dn ? dn + '_' + today : null;
+    const myTodayVal = (entry && dayKey) ? toNum(entry[dayKey]) : 0;
+    map[groupName].items.push({ item, colorName: dispC(item), hasKey, totalVal, myTodayVal });
   });
   return Object.values(map).filter(g => g.items.some(r => r.hasKey));
 }
@@ -1281,11 +1286,11 @@ function renderStock() {
   }
 
   grid.innerHTML = groups.map(g => {
-    const totalQty = g.items.reduce((s, r) => s + r.qty, 0);
+    const totalQty = g.items.reduce((s, r) => s + r.totalVal, 0);
     return `<div class="p2-tile" onclick="openStockSheet('${esc(g.name)}')">
       <div class="p2-tile-name">${esc(g.name)} <span style="font-size:13px;color:#fbbf24;font-weight:700">［ストック］</span></div>
       <div style="margin-top:10px;text-align:center">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:3px">ストック数</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:3px">全端末合計</div>
         <div style="font-size:42px;font-weight:700;color:#fbbf24;line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalQty).length >= 3 ? 0.7 : 1})">${totalQty}</div>
       </div>
     </div>`;
@@ -1310,9 +1315,15 @@ function renderStockSheetBody(g) {
       <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}</div>
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',-1)">－</button>
       <input class="p2-num-input stock-num-input" type="number" id="stock-inp-${itemId}"
-        value="${r.qty}" min="0"
+        value="${r.myTodayVal}" min="0"
         onchange="stockSetQty('${itemId}',this.value)">
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',1)">＋</button>
+      <div style="display:flex;gap:12px;margin-left:auto;align-items:baseline;flex-shrink:0">
+        <div style="text-align:center">
+          <div style="font-size:12px;color:#fbbf24">全端末</div>
+          <div style="font-size:26px;font-weight:700;color:#fbbf24">${r.totalVal}</div>
+        </div>
+      </div>
     </div>`;
   }).join('') + `
     <div style="padding:16px 4px 4px">
@@ -1323,7 +1334,7 @@ function renderStockSheetBody(g) {
 }
 
 function askDeleteStockGroup(groupName) {
-  if (!confirm(`「${groupName}」のストックを削除しますか？\n入力した数量も全て消えます。`)) return;
+  if (!confirm(`「${groupName}」のストックを削除しますか？\n全端末分の入力数量も全て消えます。`)) return;
   st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
     if (st.stock) delete st.stock[it.id];
   });
@@ -1364,8 +1375,12 @@ function stockAdjust(itemId, delta) {
 }
 
 function stockSetQty(itemId, val) {
+  const dn = st.deviceName;
+  if (!dn) { alert('端末名が未設定です。⚙️設定タブで設定してください。'); return; }
   if (!st.stock) st.stock = {};
-  st.stock[itemId] = Math.max(0, toNum(val));
+  if (!st.stock[itemId]) st.stock[itemId] = {};
+  const dayKey = dn + '_' + todayStr();
+  st.stock[itemId][dayKey] = Math.max(0, toNum(val));
   saveLocal();
   debouncedStockSave();
   renderStock();
@@ -1417,9 +1432,9 @@ function closeStockPicker() {
 
 function addStockGroup(groupName) {
   if (!st.stock) st.stock = {};
-  // グループ内の品目に stock キーを作成（0で初期化、未設定のみ）
+  // グループ内の品目に stock キーを作成（空オブジェクトで初期化、未設定のみ）
   st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
-    if (!(it.id in st.stock)) st.stock[it.id] = 0;
+    if (!(it.id in st.stock)) st.stock[it.id] = {};
   });
   closeStockPicker();
   saveLocal();
@@ -2624,11 +2639,28 @@ function applyCloudData(json, forceShiftAttend) {
     }
   }
   if (json.stock && typeof json.stock === 'object') {
-    // ストック入力欄にフォーカス中は上書きしない
-    const focused = document.activeElement;
-    if (!(focused && focused.classList.contains('stock-num-input'))) {
-      st.stock = {};
-      Object.entries(json.stock).forEach(([k,v]) => { st.stock[k] = toNum(v); });
+    const dn = st.deviceName;
+    const today = todayStr();
+    // 自端末の今日分を退避（postDoneと同じ保護ロジック）
+    const myLocalStock = {};
+    Object.entries(st.stock || {}).forEach(([itemId, entry]) => {
+      if (dn) {
+        const dayKey = dn + '_' + today;
+        if (entry && (dayKey in entry)) {
+          myLocalStock[itemId] = toNum(entry[dayKey]);
+        }
+      }
+    });
+    st.stock = {};
+    Object.entries(json.stock).forEach(([itemId, entry]) => {
+      st.stock[itemId] = Object.assign({}, entry || {});
+    });
+    if (dn) {
+      const dayKey = dn + '_' + today;
+      Object.entries(myLocalStock).forEach(([itemId, localVal]) => {
+        if (!st.stock[itemId]) st.stock[itemId] = {};
+        st.stock[itemId][dayKey] = localVal;
+      });
     }
   }
 }
@@ -2817,6 +2849,10 @@ function startPoll() {
     // 個人タブが開いている場合は達成状態を最新化
     if (document.getElementById('panel-personal').classList.contains('active')) {
       renderPersonal();
+    }
+    // ストックタブが開いている場合は最新化
+    if (document.getElementById('panel-stock').classList.contains('active')) {
+      renderStock();
     }
     // 勤怠パネルが開いていてフォーカスなしのみ更新
     if (document.getElementById('panel-attend').classList.contains('active') && !isMemberInputFocused()) {
