@@ -1282,7 +1282,15 @@ function buildStockGroups() {
     const totalVal = entry ? calcPostTotal(entry) : 0;
     const dayKey = dn ? dn + '_' + today : null;
     const myTodayVal = (entry && dayKey) ? toNum(entry[dayKey]) : 0;
-    map[groupName].items.push({ item, colorName: dispC(item), hasKey, totalVal, myTodayVal });
+    // 自分の累計（全日付）：旧キー重複除外（②個人タブと同ロジック）
+    const myTotalVal = (entry && dn) ? Object.entries(entry).reduce((s, [k, v]) => {
+      if (k === dn) {
+        const hasNew = Object.keys(entry).some(nk => nk.startsWith(dn + '_'));
+        return hasNew ? s : s + toNum(v);
+      }
+      return k.startsWith(dn + '_') ? s + toNum(v) : s;
+    }, 0) : 0;
+    map[groupName].items.push({ item, colorName: dispC(item), hasKey, totalVal, myTodayVal, myTotalVal });
   });
   return Object.values(map).filter(g => g.items.some(r => r.hasKey));
 }
@@ -1332,8 +1340,12 @@ function renderStockSheetBody(g) {
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',1)">＋</button>
       <div style="display:flex;gap:12px;margin-left:auto;align-items:baseline;flex-shrink:0">
         <div style="text-align:center">
-          <div style="font-size:12px;color:#fbbf24">全端末</div>
-          <div style="font-size:26px;font-weight:700;color:#fbbf24">${r.totalVal}</div>
+          <div style="font-size:12px;color:#f87171">全端末</div>
+          <div style="font-size:26px;font-weight:700;color:#f87171">${r.totalVal}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:12px;color:#fbbf24">自分累計</div>
+          <div style="font-size:26px;font-weight:700;color:#fbbf24">${r.myTotalVal}</div>
         </div>
       </div>
     </div>`;
