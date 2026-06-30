@@ -113,6 +113,13 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .setting-label{font-size:13px;color:var(--muted);min-width:80px}
 .setting-input{flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--faint);color:var(--text);font-size:15px}
 .sync-status{text-align:center;font-size:12px;color:var(--muted);padding:6px;margin-bottom:6px}
+#sync-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;background:#0c1422;border-bottom:1px solid var(--border);font-size:12px}
+#sync-bar-time{color:var(--muted);flex:1}
+#sync-bar-time.syncing{color:var(--y)}
+#sync-bar-time.ok{color:var(--g)}
+#sync-bar-time.error{color:var(--r)}
+#sync-bar-btn{flex-shrink:0;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--faint);color:var(--text);font-size:12px;font-weight:600}
+#sync-bar-btn.spinning{opacity:.6}
 .sync-ok{color:var(--g)}
 .sync-ng{color:var(--r)}
 /* モーダル */
@@ -206,6 +213,11 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
   <button class="tab-btn" onclick="switchTab('shift')">⑤シフト</button>
   <button class="tab-btn" onclick="switchTab('items')">⑥品目</button>
   <button class="tab-btn" onclick="switchTab('settings')">⚙️</button>
+</div>
+<!-- 共通同期バー：最終同期時刻＋手動更新 -->
+<div id="sync-bar">
+  <span id="sync-bar-time">未同期</span>
+  <button id="sync-bar-btn" onclick="manualSync()">🔄 今すぐ更新</button>
 </div>
 <!-- ①進捗パネル -->
 <div id="panel-progress" class="panel active">
@@ -2784,11 +2796,58 @@ function renderReportBody() {
 
 async function pullFromCloud() {
   const json = await Cloud.get();
-  if (!json || !json.ok) return;
+  if (!json || !json.ok) { updateSyncBar('error'); return; }
   applyCloudData(json, true);
   saveLocal();
   renderAll();
   showSyncStatus('☁️ クラウドから読み込み完了', true);
+  updateSyncBar('ok');
+}
+
+// ============================================================
+// 同期状態の可視化（共通バー）
+// ============================================================
+let _lastSyncTime = null;
+function updateSyncBar(status) {
+  const timeEl = document.getElementById('sync-bar-time');
+  if (!timeEl) return;
+  if (status === 'syncing') {
+    timeEl.textContent = '🔄 同期中...';
+    timeEl.className = 'syncing';
+    return;
+  }
+  if (status === 'error') {
+    timeEl.textContent = `❌ 同期失敗（最終成功: ${_lastSyncTime ? fmtSyncTime(_lastSyncTime) : 'なし'}）`;
+    timeEl.className = 'error';
+    return;
+  }
+  // ok
+  _lastSyncTime = new Date();
+  timeEl.textContent = `✅ 最終同期: ${fmtSyncTime(_lastSyncTime)}`;
+  timeEl.className = 'ok';
+}
+
+function fmtSyncTime(d) {
+  return d.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+async function manualSync() {
+  const btn = document.getElementById('sync-bar-btn');
+  if (!gasUrl) { alert('GAS URLが未設定です。⚙️設定タブで設定してください。'); return; }
+  if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+  updateSyncBar('syncing');
+  try {
+    const json = await Cloud.get();
+    if (!json || !json.ok) { updateSyncBar('error'); return; }
+    applyCloudData(json, true);
+    saveLocal();
+    renderAll();
+    updateSyncBar('ok');
+  } catch(e) {
+    updateSyncBar('error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('spinning'); }
+  }
 }
 
 // ポーリング
@@ -2818,7 +2877,10 @@ async function debouncedCloudSave() {
         });
       }
     } catch(e) { /* ネットワークエラー時はそのまま送信 */ }
-    Cloud.savePlansProgress(null, null);
+    Cloud.savePlansProgress(
+      () => updateSyncBar('ok'),
+      () => updateSyncBar('error')
+    );
   }, 2000);
 }
 
@@ -2839,13 +2901,14 @@ function startPoll() {
   pollTimer = setInterval(async () => {
     if (!gasUrl || isMemberInputFocused()) return;
     const json = await Cloud.get();
-    if (!json || !json.ok) return;
+    if (!json || !json.ok) { updateSyncBar('error'); return; }
     if (isMemberInputFocused()) return;
     applyCloudData(json, false);
     saveLocal();
     renderProgress();
     renderPlanList();
     renderItemList();
+    updateSyncBar('ok');
     // 個人タブが開いている場合は達成状態を最新化
     if (document.getElementById('panel-personal').classList.contains('active')) {
       renderPersonal();
