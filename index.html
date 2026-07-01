@@ -2885,6 +2885,13 @@ function startPoll() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     if (!gasUrl || isMemberInputFocused()) return;
+
+    // ④勤怠・⑤シフトタブが開いている間は入力保護のため画面更新をスキップ
+    // （データ取得・保存は行うが、シフト・勤怠の画面には反映しない）
+    const attendActive = document.getElementById('panel-attend').classList.contains('active');
+    const shiftActive  = document.getElementById('panel-shift').classList.contains('active');
+    if (attendActive || shiftActive) return;
+
     const json = await Cloud.get();
     if (!json || !json.ok) { updateSyncBar('error'); return; }
     if (isMemberInputFocused()) return;
@@ -2901,11 +2908,6 @@ function startPoll() {
     // ストックタブが開いている場合は最新化
     if (document.getElementById('panel-stock').classList.contains('active')) {
       renderStock();
-    }
-    // 勤怠パネルが開いていてフォーカスなしのみ更新
-    if (document.getElementById('panel-attend').classList.contains('active') && !isMemberInputFocused()) {
-      renderWeekHeader();
-      renderAttendDay();
     }
   }, 30000);
 }
