@@ -2596,7 +2596,8 @@ function applyCloudData(json, forceShiftAttend) {
       cutL: String(it.cutL||''), group: String(it.group||'その他'),
       price: parseFloat(it.price) || 0,
       dispName:  String(it.dispName  || ''),
-      dispColor: String(it.dispColor || '')
+      dispColor: String(it.dispColor || ''),
+      caseQty:   parseFloat(it.caseQty) || 0
     }));
   }
   if (Array.isArray(json.plans)) {
