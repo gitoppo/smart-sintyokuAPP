@@ -602,6 +602,32 @@ function caseLabel(item, qty){
 }
 
 // ===== 計画ヘルパー =====
+// 計画に登録されている品目IDのセットを返す
+function plannedItemIds(){
+  return new Set((st.plans||[]).map(p=>p.itemId));
+}
+
+// 計画に基づく残数（計画数量 - 後工程合計）を返す（未登録は null）
+function planRemaining(itemId){
+  if(!itemId) return null;
+  const plans = (st.plans||[]).filter(p=>p.itemId==itemId);
+  if(plans.length===0) return null;
+  let planTotal = plans.reduce((s,p)=>s+(parseInt(p.qty)||0),0);
+  let doneTotal = 0;
+  plans.forEach(p=>{
+    let prog = null;
+    if(Array.isArray(st.progress)){
+      const row = st.progress.find(r=>r.planId==p.id);
+      if(row){ try{ prog={postDone:JSON.parse(row.postDone||'{}')}; }catch(e){} }
+    } else {
+      prog = (st.progress||{})[p.id];
+    }
+    if(!prog) return;
+    const postDone = prog.postDone||{};
+    doneTotal += Object.values(postDone).reduce((a,v)=>a+(parseInt(v)||0),0);
+  });
+  return planTotal - doneTotal;
+}
 function plannedItemIds(){
   return new Set((st.plans||[]).map(p=>p.itemId));
 }
