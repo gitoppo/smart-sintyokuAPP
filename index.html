@@ -2425,7 +2425,25 @@ function importCsv(input) {
         dispColor: String(cols[10] || '')
       });
     });
+    // 旧品目マスターのIDと新IDの対応を作り、stockデータのキーを付け替える
+    const oldMaster = st.itemMaster || [];
     st.itemMaster = items;
+
+    // 品目名＋カラーで旧IDと新IDをマッピング
+    if (st.stock && Object.keys(st.stock).length > 0) {
+      const newStock = {};
+      const newMasterMap = {};
+      items.forEach(it => { newMasterMap[it.name + '_' + it.color] = it.id; });
+      oldMaster.forEach(oldIt => {
+        const key = oldIt.name + '_' + oldIt.color;
+        const newId = newMasterMap[key];
+        if (newId && oldIt.id in st.stock) {
+          newStock[newId] = st.stock[oldIt.id];
+        }
+      });
+      st.stock = newStock;
+    }
+
     saveLocal();
     _itemMasterSaving = true; // ポーリング上書き防止
     Cloud.saveItemMaster(
