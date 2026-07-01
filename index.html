@@ -2647,12 +2647,18 @@ function applyCloudData(json, forceShiftAttend) {
     }
   }
   if (json.stock && typeof json.stock === 'object') {
-    // ストック入力欄にフォーカス中は上書きしない
-    const focused = document.activeElement;
-    if (!(focused && focused.classList.contains('stock-num-input'))) {
-      st.stock = {};
-      Object.entries(json.stock).forEach(([k,v]) => { st.stock[k] = toNum(v); });
-    }
+    // クラウドの値とローカルの値を比較し、大きい方を採用（送信失敗時でもローカル入力値を保護）
+    const cloudStock = {};
+    Object.entries(json.stock).forEach(([k,v]) => { cloudStock[k] = toNum(v); });
+    if (!st.stock) st.stock = {};
+    Object.keys(cloudStock).forEach(k => {
+      // クラウドの値がローカルより大きい場合のみ上書き（ローカルの入力値を保護）
+      const localVal = toNum(st.stock[k]);
+      const cloudVal = cloudStock[k];
+      if (cloudVal > localVal) st.stock[k] = cloudVal;
+      else if (!(k in st.stock)) st.stock[k] = cloudVal; // ローカルにないキーは追加
+    });
+    // クラウドに存在しないキーはそのまま残す（削除操作は明示的な操作時のみ）
   }
 }
 
