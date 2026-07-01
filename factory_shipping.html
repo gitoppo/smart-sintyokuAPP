@@ -1212,20 +1212,8 @@ async function openPrintDelivery(){
   }catch(e){ console.warn('データ再読み込みエラー:', e); }
   finally{ showLoading(false); }
 
-  // ②残数超過チェック（ブロック）
-  const overItems = [];
-  st.pallets.forEach(p=>p.rows.forEach(r=>{
-    if(!r.itemId||!r.qty) return;
-    const rem = planRemaining(r.itemId);
-    const item = st.itemMaster.find(m=>m.id==r.itemId);
-    if(rem!==null && parseInt(r.qty)>rem){
-      overItems.push(`${item?.name||''}${item?.color?' ('+item.color+')':''}: 入力${r.qty}個 > 残数${rem}個`);
-    }
-  }));
-  if(overItems.length>0){
-    alert('以下の品目が計画残数を超えています。修正してください。\n\n'+overItems.join('\n'));
-    return;
-  }
+  // ②残数超過チェック（警告のみ・ブロックなし）
+  // 残数0=完了済み納品は正常なのでブロックしない
 
   // ③箱数チェック不一致チェック（ブロック）
   const unchecked = [], nomatch = [];
