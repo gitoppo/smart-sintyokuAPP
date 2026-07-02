@@ -1890,7 +1890,7 @@ function confirmEditPlan() {
   pendingEditPlanId = null;
   closeModal('modal-edit-plan');
   saveLocal();
-  debouncedCloudSave();
+  Cloud.savePlansProgress(() => updateSyncBar('ok'), () => updateSyncBar('error'));
   renderAll();
 }
 
@@ -1964,7 +1964,7 @@ function confirmDeletePlan() {
   pendingDeletePlanId = null;
   closeModal('modal-del-plan');
   saveLocal();
-  debouncedCloudSave();
+  Cloud.savePlansProgress(() => updateSyncBar('ok'), () => updateSyncBar('error'));
   renderAll();
 }
 
