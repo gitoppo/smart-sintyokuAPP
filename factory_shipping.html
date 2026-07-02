@@ -1215,19 +1215,20 @@ async function openPrintDelivery(){
   // ②残数超過チェック（警告のみ・ブロックなし）
   // 残数0=完了済み納品は正常なのでブロックしない
 
-  // ③箱数チェック不一致チェック（ブロック）
+  // ③箱数チェック不一致チェック（ブロック）※バラは対象外
   const unchecked = [], nomatch = [];
   st.pallets.forEach(p=>p.rows.forEach(r=>{
     if(!r.itemId||!r.qty) return;
     const item = st.itemMaster.find(m=>m.id==r.itemId);
     if(!item||!item.caseQty||item.caseQty<=0) return;
     const expectedCases = Math.floor((parseInt(r.qty)||0)/item.caseQty);
-    if(expectedCases===0) return;
+    if(expectedCases===0) return; // 端数のみ（1箱未満）はチェック不要
     const checkVal = _checkVals[r.itemId]||0;
     const label = `${item.name}${item.color?' ('+item.color+')':''}`;
     if(checkVal===0) unchecked.push(label+`: ${expectedCases}箱`);
     else if(checkVal!==expectedCases) nomatch.push(label+`: チェック${checkVal}箱 ≠ 登録${expectedCases}箱`);
   }));
+  // バラは箱数チェック不要（端数・補修分のため）
   if(unchecked.length>0||nomatch.length>0){
     let msg2 = '箱数チェックが完了していません。\n\n';
     if(unchecked.length>0) msg2 += '【未チェック】\n'+unchecked.join('\n')+'\n\n';
@@ -1312,6 +1313,21 @@ function printDelivery(grouped, existingRecord, startNo=1){
   document.getElementById('printArea').innerHTML=printContent;
   closeBs();
   window.print();
+
+  // 印刷後にパレット・バラ・入力欄をクリア（再印刷でない場合のみ）
+  if(!existingRecord){
+    st.pallets = [newPallet()];
+    st.bara = [{itemId:'',qty:''}];
+    _checkVals = {};
+    document.getElementById('deliveryNo').value = '';
+    document.getElementById('shippingMemo').value = '';
+    saveLocalState();
+    saveShippingWork();
+    renderItemTiles();
+    renderPallets();
+    renderBara();
+    renderMaterial();
+  }
 
   // 印刷後に履歴保存（新規or既存更新）
   if(existingRecord){
