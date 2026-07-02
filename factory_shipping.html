@@ -602,6 +602,26 @@ function caseLabel(item, qty){
 }
 
 // ===== 計画ヘルパー =====
+// 後工程完了数の合計を返す（納品可能数）
+function planDoneQty(itemId){
+  if(!itemId) return 0;
+  const plans = (st.plans||[]).filter(p=>p.itemId==itemId);
+  if(plans.length===0) return 0;
+  let doneTotal = 0;
+  plans.forEach(p=>{
+    let prog = null;
+    if(Array.isArray(st.progress)){
+      const row = st.progress.find(r=>r.planId==p.id);
+      if(row){ try{ prog={postDone:JSON.parse(row.postDone||'{}')}; }catch(e){} }
+    } else {
+      prog = (st.progress||{})[p.id];
+    }
+    if(!prog) return;
+    const postDone = prog.postDone||{};
+    doneTotal += Object.values(postDone).reduce((a,v)=>a+(parseInt(v)||0),0);
+  });
+  return doneTotal;
+}
 // 計画に登録されている品目IDのセットを返す
 function plannedItemIds(){
   return new Set((st.plans||[]).map(p=>p.itemId));
@@ -933,11 +953,11 @@ function renderPallets(){
           const {cases, label:caseLabel_} = calcCases(item, qty);
           totalCases += cases;
 
-          // 残数チェック
+          // 完了数チェック（先行納品対応：完了数を超えたら警告）
+          const doneQty = planDoneQty(r.itemId);
           let qtyClass='', warning='';
-          if(rem!==null){
-            if(qty > rem) qtyClass='over';
-            else if(qty < rem) warning=`<div class="pallet-warning">⚠ 計画残数${rem}個に対して${rem-qty}個不足</div>`;
+          if(doneQty > 0){
+            if(qty > doneQty) qtyClass='over';
           }
 
           // 箱数チェック欄
@@ -1254,10 +1274,10 @@ async function openPrintDelivery(){
   const underItems = [];
   st.pallets.forEach(p=>p.rows.forEach(r=>{
     if(!r.itemId||!r.qty) return;
-    const rem = planRemaining(r.itemId);
+    const doneQty = planDoneQty(r.itemId);
     const item = st.itemMaster.find(m=>m.id==r.itemId);
-    if(rem!==null && parseInt(r.qty)<rem && parseInt(r.qty)>0){
-      underItems.push(`${item?.name||''}${item?.color?' ('+item.color+')':''}: 入力${r.qty}個（残${rem}個）`);
+    if(doneQty > 0 && parseInt(r.qty) > doneQty){
+      underItems.push(`${item?.name||''}${item?.color?' ('+item.color+')':''}: 入力${r.qty}個 > 完了${doneQty}個`);
     }
   }));
 
