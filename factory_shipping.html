@@ -1488,7 +1488,8 @@ async function saveDeliveryRecord(slips,date,memo,type){
 function renderHistory(){
   const el=document.getElementById('historyList');
   const q=(document.getElementById('historySearch')?.value||'').trim().toLowerCase();
-  let list=st.deliveryHistory;
+  let list=[...st.deliveryHistory];
+  list.sort((a,b)=>new Date(b.timestamp||0)-new Date(a.timestamp||0));
   if(q) list=list.filter(r=>(r.shippingDate||'').includes(q)||(r.slips||[]).some(s=>(s.slipNo||'').toLowerCase().includes(q)));
   if(list.length===0){ el.innerHTML='<p style="color:#999;font-size:12px;padding:8px;">履歴がありません</p>'; return; }
   el.innerHTML=list.map((r,i)=>`
