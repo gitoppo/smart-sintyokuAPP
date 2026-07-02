@@ -2821,6 +2821,11 @@ function updateSyncBar(status) {
     timeEl.className = 'syncing';
     return;
   }
+  if (status === 'unsaved') {
+    timeEl.textContent = '⚠️ 未送信のデータあり（送信中...）';
+    timeEl.className = 'syncing';
+    return;
+  }
   if (status === 'error') {
     timeEl.textContent = `❌ 同期失敗（最終成功: ${_lastSyncTime ? fmtSyncTime(_lastSyncTime) : 'なし'}）`;
     timeEl.className = 'error';
@@ -2828,6 +2833,7 @@ function updateSyncBar(status) {
   }
   // ok
   _lastSyncTime = new Date();
+  _unsavedChanges = false;
   timeEl.textContent = `✅ 最終同期: ${fmtSyncTime(_lastSyncTime)}`;
   timeEl.className = 'ok';
 }
@@ -2857,7 +2863,21 @@ async function manualSync() {
 
 // ポーリング
 let _cloudSaveTimer = null;
+let _unsavedChanges = false; // 未送信フラグ
+
+function markUnsaved() { _unsavedChanges = true; updateSyncBar('unsaved'); }
+function markSaved()   { _unsavedChanges = false; updateSyncBar('ok'); }
+
+// ページを閉じる前に未送信データがあれば警告
+window.addEventListener('beforeunload', e => {
+  if (_unsavedChanges) {
+    e.preventDefault();
+    e.returnValue = '未送信のデータがあります。このまま閉じると入力内容が失われる可能性があります。';
+  }
+});
+
 async function debouncedCloudSave() {
+  markUnsaved();
   clearTimeout(_cloudSaveTimer);
   _cloudSaveTimer = setTimeout(async () => {
     const dn = st.deviceName;
@@ -2883,7 +2903,7 @@ async function debouncedCloudSave() {
       }
     } catch(e) { /* ネットワークエラー時はそのまま送信 */ }
     Cloud.savePlansProgress(
-      () => updateSyncBar('ok'),
+      () => markSaved(),
       () => updateSyncBar('error')
     );
   }, 2000);
