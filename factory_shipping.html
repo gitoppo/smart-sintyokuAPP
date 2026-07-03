@@ -1349,6 +1349,7 @@ function printDelivery(grouped, existingRecord, startNo=1){
 }
 
 function buildSlipHTML(slip,date,memo){
+  console.log('[DEBUG buildSlipHTML] slip.rows=', JSON.stringify(slip.rows));
   const totalQty = slip.rows.reduce((s,r)=>s+r.qty,0);
   return `
     <div class="slip-title">納品書</div>
