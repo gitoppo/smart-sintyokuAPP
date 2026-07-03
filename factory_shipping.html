@@ -505,23 +505,39 @@ function newPallet(){
   return { id: Date.now()+Math.random(), rows:[{itemId:'',qty:''}] };
 }
 
-// ===== GAS通信 =====
+// ===== GAS通信（一時的な失敗に自動リトライ） =====
+async function _gasFetch(url, options, retries=2){
+  let lastErr;
+  for(let i=0; i<=retries; i++){
+    try{
+      const res = await fetch(url, options);
+      const text = await res.text();
+      // GAS障害時、JSONではなくHTMLエラーページが返ることがあるため検証
+      if(!res.ok || text.trim().startsWith('<')){
+        throw new Error(`GAS応答異常 (status:${res.status})`);
+      }
+      return JSON.parse(text);
+    }catch(e){
+      lastErr = e;
+      if(i < retries) await new Promise(r=>setTimeout(r, 800*(i+1))); // 少し待って再試行
+    }
+  }
+  throw lastErr;
+}
 async function gasGet(action){
   const url = settings.gasUrl;
   if(!url){ toast('GAS URLを設定してください'); return null; }
-  const res = await fetch(`${url}?action=${action}&v=${Date.now()}`,
+  return _gasFetch(`${url}?action=${action}&v=${Date.now()}`,
     {method:'GET',redirect:'follow',cache:'no-store'});
-  return res.json();
 }
 async function gasPost(payload){
   const url = settings.gasUrl;
   if(!url){ toast('GAS URLを設定してください'); return null; }
-  const res = await fetch(`${url}?v=${Date.now()}`,{
+  return _gasFetch(`${url}?v=${Date.now()}`,{
     method:'POST',redirect:'follow',cache:'no-store',
     headers:{'Content-Type':'text/plain;charset=UTF-8'},
     body:JSON.stringify(payload)
   });
-  return res.json();
 }
 
 async function loadFromGas(){
@@ -1938,5 +1954,3 @@ function showLoading(v){
 </script>
 </body>
 </html>
-
-
