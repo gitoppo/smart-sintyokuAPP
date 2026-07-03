@@ -92,6 +92,21 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .editSlipBody{padding:10px;}
 .editRow{display:grid;grid-template-columns:1fr 80px 32px;gap:6px;align-items:center;margin-bottom:6px;}
 
+/* ===== チェックリストマトリクスモーダル ===== */
+#cmModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9991;display:none;align-items:center;justify-content:center;}
+#cmModal.open{display:flex;}
+#cmModalInner{background:#fff;border-radius:8px;padding:16px;width:96%;max-width:900px;max-height:90vh;display:flex;flex-direction:column;}
+.cmTableWrap{overflow:auto;flex:1;border:1px solid #ddd;border-radius:6px;margin:10px 0;}
+#cmTable{border-collapse:collapse;font-size:12px;white-space:nowrap;}
+#cmTable th,#cmTable td{border:1px solid #ddd;}
+#cmTable thead th{position:sticky;top:0;background:#1a1a2e;color:#fff;padding:8px 10px;font-size:12px;z-index:2;}
+#cmTable thead th:first-child{left:0;z-index:3;background:#1a1a2e;}
+#cmTable tbody th{position:sticky;left:0;background:#e8f0fe;color:#1a1a2e;text-align:left;padding:6px 10px;font-size:13px;font-weight:700;z-index:1;}
+#cmTable td{padding:4px;text-align:center;background:#fff;}
+#cmTable td.cm-empty{background:#f5f5f5;}
+.cm-qty-input{width:56px;font-size:15px;text-align:center;padding:5px 2px;border:1px solid #ccc;border-radius:6px;}
+.cm-case-label{font-size:10px;color:#0f3460;margin-top:2px;min-height:12px;}
+
 /* ===== パレット行拡張 ===== */
 .pallet-row-ext{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;}
 .pallet-row-label{font-size:16px;font-weight:600;flex:1;min-width:0;}
@@ -137,7 +152,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 @media print{
   @page{margin:10mm;size:A4 portrait;}
   body{background:#fff;font-size:10.5pt;}
-  #tabBar,#toast,#loading,#editModal,#bs,#bs-overlay,.no-print{display:none!important;}
+  #tabBar,#toast,#loading,#editModal,#cmModal,#bs,#bs-overlay,.no-print{display:none!important;}
   .tabContent{display:none!important;}
   #printArea{display:block!important;}
 
@@ -248,6 +263,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <button class="btn-primary" style="padding:10px 16px;font-size:15px;" onclick="addPallet()">＋ パレット追加</button>
     <button class="btn-success" style="padding:10px 16px;font-size:15px;" onclick="openPrintDelivery()">🖨 納品書印刷</button>
     <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openPrintChecklist()">📋 チェックリスト印刷</button>
+    <button class="btn-warn" style="padding:10px 16px;font-size:15px;" onclick="openChecklistMatrix()">🧮 チェックリスト入力</button>
   </div>
 </div>
 
@@ -336,6 +352,26 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <button class="btn-primary" onclick="saveSettings()">💾 設定を保存</button>
       <button class="btn-gray" onclick="pingGas()">🔗 接続確認</button>
       <button class="btn-gray" onclick="loadFromGas()">🔄 データ再読み込み</button>
+    </div>
+  </div>
+</div>
+
+<!-- チェックリストマトリクスモーダル -->
+<div id="cmModal">
+  <div id="cmModalInner">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="font-weight:bold;font-size:15px;flex:1;">🧮 チェックリスト入力（マトリクス）</div>
+      <div class="bs-close" onclick="closeChecklistMatrix()">✕</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <label style="font-size:12px;color:#666;">追加先パレット</label>
+      <select id="cm-pallet-sel" class="bs-pallet-select" style="width:auto;"></select>
+      <button class="btn-gray btn-sm" onclick="cmClearAll()">🔄 入力クリア</button>
+    </div>
+    <div class="cmTableWrap"><div id="cmTableHolder"></div></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-success" style="flex:1;padding:10px;font-size:15px;" onclick="reflectChecklistToPallet()">✅ パレット入力に反映</button>
+      <button class="btn-gray" onclick="closeChecklistMatrix()">閉じる</button>
     </div>
   </div>
 </div>
@@ -910,6 +946,135 @@ function onPalletChange(pIdx,rIdx,field,val){
   st.pallets[pIdx].rows[rIdx][field] = field==='qty'?(parseInt(val)||''):val;
   saveLocalState(); renderItemTiles(); renderMaterial(); debounceWorkSave();
 }
+// ===== チェックリストマトリクス（縦軸:カラー、横軸:品目グループ） =====
+let _cmData = null; // {groups:[{name,dispName}], colorOrder:[color], cellMap:{color:{groupName:item|null}}}
+
+function buildChecklistMatrix(){
+  const ids = plannedItemIds();
+  const items = ids.size > 0 ? st.itemMaster.filter(m=>ids.has(m.id)) : st.itemMaster;
+
+  // 横軸：品目グループ（品目タイルと同じ並び・表示名）
+  const groupsMap = {};
+  items.forEach(m=>{
+    const g = m.group || 'その他';
+    if(!groupsMap[g]) groupsMap[g] = {name:g, dispName:(m.dispName||g), items:[]};
+    groupsMap[g].items.push(m);
+  });
+  const groups = Object.values(groupsMap);
+
+  // 縦軸：カラー（登場順）
+  const colorOrder = [];
+  const colorSeen = new Set();
+  items.forEach(m=>{
+    const c = m.color || '(指定なし)';
+    if(!colorSeen.has(c)){ colorSeen.add(c); colorOrder.push(c); }
+  });
+
+  // セル：カラー×グループ→該当品目（無ければnull）
+  const cellMap = {};
+  colorOrder.forEach(c=>{
+    cellMap[c] = {};
+    groups.forEach(g=>{
+      cellMap[c][g.name] = g.items.find(m=>(m.color||'(指定なし)')===c) || null;
+    });
+  });
+
+  return {groups, colorOrder, cellMap};
+}
+
+function openChecklistMatrix(){
+  _cmData = buildChecklistMatrix();
+  if(_cmData.groups.length===0 || _cmData.colorOrder.length===0){
+    toast('品目マスターを読み込んでください');
+    return;
+  }
+
+  // 追加先パレット選択肢
+  const palSel = document.getElementById('cm-pallet-sel');
+  palSel.innerHTML = st.pallets.map((p,i)=>`<option value="${i}">パレット ${i+1}</option>`).join('');
+
+  // マトリクステーブル生成
+  const {groups, colorOrder, cellMap} = _cmData;
+  const theadCols = groups.map(g=>`<th>${esc(g.dispName)}</th>`).join('');
+  const bodyRows = colorOrder.map(c=>{
+    const cells = groups.map(g=>{
+      const item = cellMap[c][g.name];
+      if(!item) return `<td class="cm-empty"></td>`;
+      return `<td>
+        <input type="number" min="0" class="cm-qty-input" id="cm-inp-${esc(item.id)}" value="0"
+          oninput="cmUpdateCase('${esc(item.id)}',${item.caseQty||0},this.value)">
+        <div class="cm-case-label" id="cm-case-${esc(item.id)}"></div>
+      </td>`;
+    }).join('');
+    return `<tr><th>${esc(c)}</th>${cells}</tr>`;
+  }).join('');
+
+  document.getElementById('cmTableHolder').innerHTML =
+    `<table id="cmTable"><thead><tr><th>カラー＼品目</th>${theadCols}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+
+  document.getElementById('cmModal').classList.add('open');
+}
+
+function closeChecklistMatrix(){
+  document.getElementById('cmModal').classList.remove('open');
+}
+
+function cmUpdateCase(itemId, caseQty, qty){
+  const el = document.getElementById('cm-case-'+itemId);
+  if(!el) return;
+  const q = parseInt(qty)||0;
+  if(!caseQty || caseQty<=0 || q<=0){ el.textContent=''; return; }
+  const whole = Math.floor(q/caseQty);
+  const rem = q % caseQty;
+  el.textContent = rem===0 ? whole+'箱' : whole+'箱+'+rem;
+}
+
+function cmClearAll(){
+  if(!_cmData) return;
+  _cmData.groups.forEach(g=>{
+    _cmData.colorOrder.forEach(c=>{
+      const item = _cmData.cellMap[c][g.name];
+      if(!item) return;
+      const inp = document.getElementById('cm-inp-'+item.id);
+      if(inp) inp.value = 0;
+      const lbl = document.getElementById('cm-case-'+item.id);
+      if(lbl) lbl.textContent = '';
+    });
+  });
+}
+
+function reflectChecklistToPallet(){
+  if(!_cmData) return;
+  const palIdx = parseInt(document.getElementById('cm-pallet-sel').value);
+  if(isNaN(palIdx) || !st.pallets[palIdx]){ toast('パレットを選択してください'); return; }
+
+  let added = 0;
+  _cmData.groups.forEach(g=>{
+    _cmData.colorOrder.forEach(c=>{
+      const item = _cmData.cellMap[c][g.name];
+      if(!item) return;
+      const inp = document.getElementById('cm-inp-'+item.id);
+      const qty = parseInt(inp?.value)||0;
+      if(qty <= 0) return;
+      const existing = st.pallets[palIdx].rows.find(r=>r.itemId==item.id);
+      if(existing){
+        existing.qty = (parseInt(existing.qty)||0) + qty;
+      } else {
+        const empty = st.pallets[palIdx].rows.find(r=>!r.itemId);
+        if(empty){ empty.itemId=item.id; empty.qty=qty; }
+        else st.pallets[palIdx].rows.push({itemId:item.id, qty});
+      }
+      added++;
+    });
+  });
+
+  if(added===0){ toast('数量を入力してください'); return; }
+  saveLocalState(); renderPallets(); renderBara(); renderMaterial(); renderItemTiles();
+  saveShippingWork();
+  closeChecklistMatrix();
+  toast(`パレット${palIdx+1}に反映しました（${added}品目）`);
+}
+
 function calcCases(item, qty){
   if(!item||!item.caseQty||item.caseQty<=0||qty<=0) return {cases:0, rem:0, label:''};
   const cases = Math.floor(qty/item.caseQty);
