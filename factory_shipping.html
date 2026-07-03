@@ -1306,7 +1306,8 @@ function printDelivery(grouped, existingRecord, startNo=1){
       color:  r.item.color||'',
       qty:    r.qty,
       price:  r.item.price||0,
-      amount: (r.item.price||0)*r.qty
+      amount: (r.item.price||0)*r.qty,
+      memo:   r.memo||''
     }));
     const subtotal=rows.reduce((s,r)=>s+r.amount,0);
     const tax=Math.floor(subtotal*TAX_RATE);
@@ -1642,7 +1643,7 @@ function saveEditAndReprint(){
   // slipsをgrouped形式に変換して再印刷
   const grouped=record.slips.map(s=>({
     groupName:s.groupName,
-    rows:s.rows.map(r=>({item:{id:r.itemId,name:r.name,color:r.color,price:r.price},qty:r.qty}))
+    rows:s.rows.map(r=>({item:{id:r.itemId,name:r.name,color:r.color,price:r.price},qty:r.qty,memo:r.memo||''}))
   }));
   printDelivery(grouped, record);
   saveLocalState();
