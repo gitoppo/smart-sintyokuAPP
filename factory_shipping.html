@@ -2172,10 +2172,11 @@ function getShippedQtyByGroup(group, afterDate){
   st.deliveryHistory.forEach(r=>{
     if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
     if(!r.shippingDate || r.shippingDate <= afterDate) return;
+    const recordIsRepair = isRepairRow(r.memo, keywords); // 伝票全体（出荷メモ）での判定
     (r.slips||[]).forEach(s=>{
       if(s.groupName!==group) return;
       (s.rows||[]).forEach(row=>{
-        if(isRepairRow(row.memo, keywords)) return; // 補修分は在庫を消費しないため除外
+        if(recordIsRepair || isRepairRow(row.memo, keywords)) return; // 補修分は在庫を消費しないため除外
         total += parseInt(row.qty)||0;
       });
     });
