@@ -28,6 +28,8 @@ function doPost(e) {
     if (action === 'deleteShipping')      return deleteShipping_(p);
     if (action === 'getSlipNo')           return getSlipNo_(p);
     if (action === 'saveStock')           return saveStock_(p);
+    if (action === 'archiveOldMonths')    return archiveOldMonths_(p);
+    if (action === 'archiveOperationLog') return archiveOperationLog_(p);
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -378,6 +380,166 @@ function toDateString_(v) {
 }
 
 // レスポンスヘルパー
+// ============================================================
+// メンテナンス：月次アーカイブ（plans/progress）・古いoperationLog削除
+// ============================================================
+
+// 当月より前の月のplans/progressを月別アーカイブシートへ退避し、元シートから削除する
+function archiveOldMonths_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
+  }
+  try {
+    const plans = readPlansSheet_(ss);
+    const progress = readProgressSheet_(ss);
+    const currentMonth = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM');
+
+    // 当月より前の月ごとにplansをグループ化
+    const byMonth = {};
+    plans.forEach(function (pl) {
+      const month = (pl.date || '').slice(0, 7); // 'yyyy-MM'
+      if (!month || month >= currentMonth) return; // 当月・日付不明は対象外
+      if (!byMonth[month]) byMonth[month] = [];
+      byMonth[month].push(pl);
+    });
+
+    const archivedMonths = Object.keys(byMonth).sort();
+    if (archivedMonths.length === 0) {
+      return ok({ message: 'アーカイブ対象の月はありませんでした（当月より前の計画データなし）', archivedMonths: [] });
+    }
+
+    archivedMonths.forEach(function (month) {
+      const monthPlans = byMonth[month];
+      const planIds = {};
+      monthPlans.forEach(function (pl) { planIds[pl.id] = true; });
+
+      appendPlansArchive_(ss, month, monthPlans);
+
+      const monthProgress = {};
+      Object.keys(progress).forEach(function (planId) {
+        if (planIds[planId]) monthProgress[planId] = progress[planId];
+      });
+      appendProgressArchive_(ss, month, monthProgress);
+    });
+
+    // 元のplans/progressから、アーカイブ済みの月のデータを削除
+    const remainingPlans = plans.filter(function (pl) {
+      const month = (pl.date || '').slice(0, 7);
+      return !month || month >= currentMonth;
+    });
+    writePlansSheet_(ss, remainingPlans);
+
+    const remainingPlanIds = {};
+    remainingPlans.forEach(function (pl) { remainingPlanIds[pl.id] = true; });
+    const remainingProgress = {};
+    Object.keys(progress).forEach(function (planId) {
+      if (remainingPlanIds[planId]) remainingProgress[planId] = progress[planId];
+    });
+    writeProgressSheet_(ss, remainingProgress);
+
+    return ok({ message: 'アーカイブ完了: ' + archivedMonths.join(', '), archivedMonths: archivedMonths });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// plansアーカイブシートへ追記（月ごとに1シート、既存があれば末尾に追加）
+function appendPlansArchive_(ss, month, plansArr) {
+  const shName = 'plans_archive_' + month;
+  let sheet = ss.getSheetByName(shName);
+  if (!sheet) {
+    sheet = ss.insertSheet(shName);
+    sheet.getRange(1, 1, 1, 6).setValues([['id', 'date', 'itemId', 'qty', 'memo', 'priority']]);
+  }
+  if (plansArr.length === 0) return;
+  const rows = plansArr.map(function (pl) {
+    return [pl.id, pl.date, pl.itemId, pl.qty, pl.memo || '', pl.priority ? 'TRUE' : 'FALSE'];
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 6).setValues(rows);
+}
+
+// progressアーカイブシートへ追記（月ごとに1シート、既存があれば末尾に追加）
+function appendProgressArchive_(ss, month, progressObj) {
+  const shName = 'progress_archive_' + month;
+  let sheet = ss.getSheetByName(shName);
+  if (!sheet) {
+    sheet = ss.insertSheet(shName);
+    sheet.getRange(1, 1, 1, 3).setValues([['planId', 'preDone', 'postDone']]);
+  }
+  const keys = Object.keys(progressObj);
+  if (keys.length === 0) return;
+  const rows = keys.map(function (k) {
+    return [k, progressObj[k].preDone || 0, JSON.stringify(progressObj[k].postDone || {})];
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
+}
+
+// operationLogの古い行を、単一のアーカイブシートへ移動する（削除ではなく退避）
+// ※ 月ごとにシートを分けず1枚に集約：行数は多くなるが、タブ数が際限なく増えるのを防ぐため
+//    アーカイブシートは通常の読み込み処理(getAll_)の対象外なので、読み込み速度には影響しない
+var OPERATION_LOG_KEEP_MONTHS = 3; // 保持期間（月数）。変更したい場合はここを編集する
+
+function archiveOperationLog_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
+  }
+  try {
+    const sheet = ss.getSheetByName('operationLog');
+    if (!sheet) return ok({ message: 'operationLogシートがありません', archivedCount: 0 });
+
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return ok({ message: '対象がありませんでした', archivedCount: 0 });
+
+    const header = data[0];
+    const keepMonths = (p && p.keepMonths) || OPERATION_LOG_KEEP_MONTHS;
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - keepMonths);
+
+    const kept = [header];
+    const toArchive = [];
+    for (let i = 1; i < data.length; i++) {
+      const ts = data[i][0];
+      const d = ts ? new Date(ts) : null;
+      if (d && !isNaN(d.getTime()) && d < cutoff) {
+        toArchive.push(data[i]);
+      } else {
+        kept.push(data[i]);
+      }
+    }
+
+    if (toArchive.length === 0) {
+      return ok({ message: 'アーカイブ対象はありませんでした', archivedCount: 0 });
+    }
+
+    // アーカイブ先シートへ追記（1枚のみ、月ごとに分けない）
+    let archiveSheet = ss.getSheetByName('operationLog_archive');
+    if (!archiveSheet) {
+      archiveSheet = ss.insertSheet('operationLog_archive');
+      archiveSheet.getRange(1, 1, 1, header.length).setValues([header]);
+    }
+    archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, toArchive.length, header.length).setValues(toArchive);
+
+    // 元のoperationLogから、アーカイブした行を除去
+    sheet.clearContents();
+    sheet.getRange(1, 1, kept.length, header.length).setValues(kept);
+
+    return ok({ message: toArchive.length + '件をoperationLog_archiveへ退避しました', archivedCount: toArchive.length });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ============================================================
+// ok/errRes ヘルパー
+// ============================================================
 function ok(data) {
   data.ok = true;
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
