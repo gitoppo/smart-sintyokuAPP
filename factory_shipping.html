@@ -354,6 +354,17 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <button class="btn-gray" onclick="loadFromGas()">🔄 データ再読み込み</button>
     </div>
   </div>
+  <div class="card">
+    <div class="cardTitle">サーバーメンテナンス</div>
+    <div style="font-size:12px;color:#666;margin-bottom:8px;">
+      現場用アプリと共有しているスプレッドシートが重くなってきた場合に実行してください。<br>
+      当月より前の生産計画・進捗実績、および直近3ヶ月より古い作業ログは、それぞれ専用のアーカイブシートに退避されます（削除ではなく移動なので、あとから見返せます。普段の読み込み速度にも影響しません）。
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn-warn" onclick="archiveOldMonths()">🗄 古い生産計画をアーカイブ</button>
+      <button class="btn-warn" onclick="archiveOperationLog()">🗄 古い作業ログをアーカイブ</button>
+    </div>
+  </div>
 </div>
 
 <!-- チェックリストマトリクスモーダル -->
@@ -602,6 +613,30 @@ async function pingGas(){
   showLoading(true);
   try{ const d = await gasGet('ping'); toast(d?'接続OK':'応答なし'); }
   catch(e){ toast('接続失敗: '+e.message); }
+  finally{ showLoading(false); }
+}
+
+async function archiveOldMonths(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+  if(!confirm('当月より前の生産計画・進捗実績を、月別アーカイブシートへ退避します。\n（元のシートからは削除されますが、アーカイブシートに保存されるため見返せます）\n\n実行しますか？')) return;
+  showLoading(true);
+  try{
+    const res = await gasPost({action:'archiveOldMonths'});
+    if(res && res.ok){ toast(res.message||'アーカイブ完了'); }
+    else{ toast('エラー: '+(res?res.error:'不明なエラー')); }
+  }catch(e){ toast('通信エラー: '+e.message); }
+  finally{ showLoading(false); }
+}
+
+async function archiveOperationLog(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+  if(!confirm('直近3ヶ月より古い作業ログ（operationLog）を、operationLog_archiveシートへ退避します。\n（削除ではなく移動なので、あとからスプレッドシート上で見返せます）\n\n実行しますか？')) return;
+  showLoading(true);
+  try{
+    const res = await gasPost({action:'archiveOperationLog'});
+    if(res && res.ok){ toast(res.message||'アーカイブ完了'); }
+    else{ toast('エラー: '+(res?res.error:'不明なエラー')); }
+  }catch(e){ toast('通信エラー: '+e.message); }
   finally{ showLoading(false); }
 }
 
