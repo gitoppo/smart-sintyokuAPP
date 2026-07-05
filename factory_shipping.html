@@ -1092,6 +1092,7 @@ function cmRenderTable(){
 
 // 1セル分のHTML（レ点方式 or 1箱数量不明品目のみ数字入力にフォールバック）
 function cmCellHTML(item){
+  console.log('[DEBUG cmCellHTML]', item.id, item.name, item.color, 'caseQty=', item.caseQty, typeof item.caseQty);
   if(item.caseQty && item.caseQty>0){
     return cmBoxesHTML(item);
   }
