@@ -8,6 +8,7 @@ function doGet(e) {
     if (action === 'ping') return ok({ message: 'pong' });
     if (action === 'getAll') return getAll_();
     if (action === 'getShipping') return getShipping_();
+    if (action === 'getMaterialStock') return getMaterialStock_();
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -30,6 +31,9 @@ function doPost(e) {
     if (action === 'saveStock')           return saveStock_(p);
     if (action === 'archiveOldMonths')    return archiveOldMonths_(p);
     if (action === 'archiveOperationLog') return archiveOperationLog_(p);
+    if (action === 'saveMaterialStockSettings') return saveMaterialStockSettings_(p);
+    if (action === 'saveMaterialMovement')      return saveMaterialMovement_(p);
+    if (action === 'deleteMaterialMovement')    return deleteMaterialMovement_(p);
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -540,6 +544,62 @@ function archiveOperationLog_(p) {
 // ============================================================
 // ok/errRes ヘルパー
 // ============================================================
+// ============================================================
+// 材料在庫（客先支給の板金加工品在庫管理）
+// ============================================================
+
+// 設定（対象グループのON/OFF・起点在庫）＋ 入荷・返品の手入力履歴を取得
+function getMaterialStock_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const settingsArr = readJsonSheet_(ss, 'materialStockSettings');
+  const settings = settingsArr[0] || { enabledGroups: [], baseline: {}, baselineDate: '' };
+  const movements = readJsonSheet_(ss, 'materialMovements');
+  return ok({ settings: settings, movements: movements });
+}
+
+// 設定（対象グループ・起点在庫）を保存（毎回上書き）
+function saveMaterialStockSettings_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
+  try {
+    writeJsonSheet_(ss, 'materialStockSettings', [p.settings || {}]);
+    return ok({ message: '設定を保存しました' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 入荷・返品の1件を追記
+function saveMaterialMovement_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
+  try {
+    const movements = readJsonSheet_(ss, 'materialMovements');
+    movements.push(p.movement);
+    writeJsonSheet_(ss, 'materialMovements', movements);
+    return ok({ message: '保存しました' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 入荷・返品の1件を削除
+function deleteMaterialMovement_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
+  try {
+    let movements = readJsonSheet_(ss, 'materialMovements');
+    movements = movements.filter(function (m) { return m.id !== p.id; });
+    writeJsonSheet_(ss, 'materialMovements', movements);
+    return ok({ message: '削除しました' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function ok(data) {
   data.ok = true;
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
