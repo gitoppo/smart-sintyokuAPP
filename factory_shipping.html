@@ -409,6 +409,11 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <label style="font-size:12px;color:#666;">起点日</label>
       <input type="date" id="msBaselineDate" style="width:100%;">
     </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;color:#666;">補修分として除外する備考キーワード（カンマ区切り）</label>
+      <input type="text" id="msRepairKeywords" placeholder="補修,補修分,貼り直し分" style="width:100%;">
+      <div style="font-size:11px;color:#999;margin-top:2px;">納品書の備考欄に、これらの文言が含まれる行は在庫を減らしません（補修品の再出荷など）</div>
+    </div>
     <div id="msGroupSettingsList" style="max-height:50vh;overflow-y:auto;"></div>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button class="btn-success" onclick="saveMaterialStockSettingsFromModal()">💾 保存</button>
@@ -506,7 +511,7 @@ let st = {
   pallets: [],
   bara: [],
   deliveryHistory: [],
-  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '' }, movements: [] }
+  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [] }
   // deliveryHistory の各レコード:
   // { id, timestamp, deviceName, shippingDate, memo,
   //   slips: [{slipNo, groupName, rows:[{itemId,name,color,qty,price}], subtotal, tax, total}],
@@ -602,7 +607,7 @@ function loadLocalState(){
     st.pallets         = d.pallets         || [];
     st.bara            = d.bara            || [];
     st.deliveryHistory = d.deliveryHistory || [];
-    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:''}, movements:[]};
+    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[]};
   }
   if(st.pallets.length === 0) st.pallets.push(newPallet());
   if(st.bara.length === 0)    st.bara.push({itemId:'',qty:''});
@@ -700,7 +705,7 @@ async function loadFromGas(){
     }
     const msData = await gasGet('getMaterialStock');
     if(msData && msData.ok){
-      st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:''};
+      st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
       st.materialStock.movements = msData.movements || [];
       saveLocalState();
     }
@@ -2154,15 +2159,25 @@ function getMaterialGroupList(){
   return list;
 }
 
-// 出荷履歴から、指定グループ・指定日以降の出荷済み合計数量を取得
+// 備考欄に補修分キーワードが含まれる行かどうか判定（材料在庫の減算から除外するため）
+function isRepairRow(memo, keywords){
+  if(!memo) return false;
+  return (keywords||[]).some(k=>k && memo.includes(k));
+}
+
+// 出荷履歴から、指定グループ・指定日以降の出荷済み合計数量を取得（補修分は除外）
 function getShippedQtyByGroup(group, afterDate){
+  const keywords = (st.materialStock.settings||{}).repairKeywords || [];
   let total = 0;
   st.deliveryHistory.forEach(r=>{
     if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
     if(!r.shippingDate || r.shippingDate <= afterDate) return;
     (r.slips||[]).forEach(s=>{
       if(s.groupName!==group) return;
-      (s.rows||[]).forEach(row=>{ total += parseInt(row.qty)||0; });
+      (s.rows||[]).forEach(row=>{
+        if(isRepairRow(row.memo, keywords)) return; // 補修分は在庫を消費しないため除外
+        total += parseInt(row.qty)||0;
+      });
     });
   });
   return total;
@@ -2170,7 +2185,7 @@ function getShippedQtyByGroup(group, afterDate){
 
 // 現在庫数を算出：起点在庫 + 入荷 − 返品 − 出荷（起点日より後の分）
 function computeMaterialStock(){
-  const settings = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:''};
+  const settings = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
   const baselineDate = settings.baselineDate || '0000-00-00';
   const enabled = settings.enabledGroups || [];
   const groups = getMaterialGroupList().filter(g=>enabled.includes(g.name));
@@ -2281,8 +2296,9 @@ async function deleteMaterialMovementUI(id){
 
 function openMaterialStockSettings(){
   const groups = getMaterialGroupList();
-  const settingsObj = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:''};
+  const settingsObj = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
   document.getElementById('msBaselineDate').value = settingsObj.baselineDate||'';
+  document.getElementById('msRepairKeywords').value = (settingsObj.repairKeywords||[]).join(',');
   document.getElementById('msGroupSettingsList').innerHTML = groups.map(g=>{
     const checked = (settingsObj.enabledGroups||[]).includes(g.name);
     const baseVal = settingsObj.baseline?.[g.name] ?? '';
@@ -2303,6 +2319,8 @@ async function saveMaterialStockSettingsFromModal(){
   const groups = getMaterialGroupList();
   const baselineDate = document.getElementById('msBaselineDate').value;
   if(!baselineDate){ toast('起点日を入力してください'); return; }
+  const repairKeywords = document.getElementById('msRepairKeywords').value
+    .split(',').map(s=>s.trim()).filter(s=>s);
   const enabledGroups = [];
   const baseline = {};
   groups.forEach(g=>{
@@ -2312,7 +2330,7 @@ async function saveMaterialStockSettingsFromModal(){
       baseline[g.name] = parseInt(document.getElementById('ms-base-'+g.name).value)||0;
     }
   });
-  const newSettings = {enabledGroups, baseline, baselineDate};
+  const newSettings = {enabledGroups, baseline, baselineDate, repairKeywords};
   st.materialStock.settings = newSettings;
   saveLocalState();
   closeMaterialStockSettings();
