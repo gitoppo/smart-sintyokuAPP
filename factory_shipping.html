@@ -2356,7 +2356,7 @@ function printMaterialStock(){
 }
 
 function showTab(id){
-  const tabs=['tabPallet','tabMaterial','tabHistory','tabInvoice','tabSettings'];
+  const tabs=['tabPallet','tabMaterial','tabHistory','tabInvoice','tabMaterialStock','tabSettings'];
   document.querySelectorAll('.tabContent').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
   document.getElementById(id)?.classList.add('active');
