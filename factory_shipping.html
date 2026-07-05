@@ -105,7 +105,11 @@ tr:nth-child(even) td{background:#f9f9f9;}
 #cmTable td{padding:4px;text-align:center;background:#fff;}
 #cmTable td.cm-empty{background:#f5f5f5;}
 .cm-qty-input{width:56px;font-size:15px;text-align:center;padding:5px 2px;border:1px solid #ccc;border-radius:6px;}
-.cm-case-label{font-size:10px;color:#0f3460;margin-top:2px;min-height:12px;}
+.cm-case-label{font-size:10px;color:#0f3460;margin-top:2px;min-height:12px;white-space:nowrap;}
+.cm-boxes{display:flex;flex-wrap:wrap;gap:2px;max-width:120px;}
+.cm-checkbox{width:18px;height:18px;border:1px solid #999;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:bold;color:#0f3460;background:#fff;cursor:pointer;user-select:none;flex-shrink:0;}
+.cm-checkbox.checked{background:#d4edda;border-color:#28a745;color:#1a7a32;}
+.cm-checkbox:active{transform:scale(0.9);}
 
 /* ===== パレット行拡張 ===== */
 .pallet-row-ext{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;}
@@ -379,6 +383,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <select id="cm-pallet-sel" class="bs-pallet-select" style="width:auto;"></select>
       <button class="btn-gray btn-sm" onclick="cmClearAll()">🔄 入力クリア</button>
     </div>
+    <div style="font-size:11px;color:#999;margin-top:4px;">タップで☑（1箱分）を積み上げます。1箱に満たない端数は品目タイルから「バラに追加」してください。</div>
     <div class="cmTableWrap"><div id="cmTableHolder"></div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn-success" style="flex:1;padding:10px;font-size:15px;" onclick="reflectChecklistToPallet()">✅ パレット入力に反映</button>
@@ -1006,6 +1011,9 @@ function onPalletMemoByItemId(pIdx, itemId, val){
 }
 // ===== チェックリストマトリクス（縦軸:カラー、横軸:品目グループ） =====
 let _cmData = null; // {groups:[{name,dispName}], colorOrder:[color], cellMap:{color:{groupName:item|null}}}
+let _cmFlatItems = {}; // itemId -> item（レ点タップ時の参照用）
+let _cmCaseCounts = {}; // itemId -> 箱数（レ点の数）
+let _cmFallbackQty = {}; // itemId -> 個数（1箱の数量が不明な品目用の予備入力）
 
 function buildChecklistMatrix(){
   const ids = plannedItemIds();
@@ -1047,58 +1055,84 @@ function openChecklistMatrix(){
     return;
   }
 
+  // 状態を初期化（開くたびに白紙から）
+  _cmFlatItems = {};
+  _cmCaseCounts = {};
+  _cmFallbackQty = {};
+  _cmData.groups.forEach(g=>{
+    _cmData.colorOrder.forEach(c=>{
+      const item = _cmData.cellMap[c][g.name];
+      if(item) _cmFlatItems[item.id] = item;
+    });
+  });
+
   // 追加先パレット選択肢
   const palSel = document.getElementById('cm-pallet-sel');
   palSel.innerHTML = st.pallets.map((p,i)=>`<option value="${i}">パレット ${i+1}</option>`).join('');
 
-  // マトリクステーブル生成
+  cmRenderTable();
+  document.getElementById('cmModal').classList.add('open');
+}
+
+function cmRenderTable(){
   const {groups, colorOrder, cellMap} = _cmData;
   const theadCols = groups.map(g=>`<th>${esc(g.dispName)}</th>`).join('');
   const bodyRows = colorOrder.map(c=>{
     const cells = groups.map(g=>{
       const item = cellMap[c][g.name];
       if(!item) return `<td class="cm-empty"></td>`;
-      return `<td>
-        <input type="number" min="0" class="cm-qty-input" id="cm-inp-${esc(item.id)}" value="0"
-          oninput="cmUpdateCase('${esc(item.id)}',${item.caseQty||0},this.value)">
-        <div class="cm-case-label" id="cm-case-${esc(item.id)}"></div>
-      </td>`;
+      return `<td><div id="cm-cell-${esc(item.id)}">${cmCellHTML(item)}</div></td>`;
     }).join('');
     return `<tr><th>${esc(c)}</th>${cells}</tr>`;
   }).join('');
 
   document.getElementById('cmTableHolder').innerHTML =
     `<table id="cmTable"><thead><tr><th>カラー＼品目</th>${theadCols}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+}
 
-  document.getElementById('cmModal').classList.add('open');
+// 1セル分のHTML（レ点方式 or 1箱数量不明品目のみ数字入力にフォールバック）
+function cmCellHTML(item){
+  if(item.caseQty && item.caseQty>0){
+    return cmBoxesHTML(item);
+  }
+  // 1箱の数量が品目マスターに無い場合のみ、従来の数字入力にフォールバック
+  const qty = _cmFallbackQty[item.id]||'';
+  return `<input type="number" min="0" class="cm-qty-input" id="cm-inp-${esc(item.id)}" value="${qty}"
+    oninput="_cmFallbackQty['${esc(item.id)}']=parseInt(this.value)||0">
+    <div class="cm-case-label">1箱数不明</div>`;
+}
+
+// レ点（タリー）方式：タップした位置まで箱数をセット（紙のチェックリストと同じ操作感）
+function cmBoxesHTML(item){
+  const count = _cmCaseCounts[item.id] || 0;
+  const display = Math.max(8, count + 3); // 埋まったら自動で列を増やす
+  let boxes = '';
+  for(let i=0; i<display; i++){
+    const checked = i < count;
+    boxes += `<span class="cm-checkbox${checked?' checked':''}" onclick="cmToggleCase('${esc(item.id)}',${i})">${checked?'✓':''}</span>`;
+  }
+  const total = count * item.caseQty;
+  return `<div class="cm-boxes">${boxes}</div><div class="cm-case-label">${count>0?`${count}箱＝計 ${total}`:`1箱=${item.caseQty}個`}</div>`;
+}
+
+function cmToggleCase(itemId, idx){
+  const cur = _cmCaseCounts[itemId] || 0;
+  // 既にチェック済みの位置をタップ→そこまで減らす／未チェックの位置をタップ→そこまで増やす（紙のタリーと同じ操作）
+  _cmCaseCounts[itemId] = (idx < cur) ? idx : idx+1;
+  const item = _cmFlatItems[itemId];
+  const cell = document.getElementById('cm-cell-'+itemId);
+  if(cell && item) cell.innerHTML = cmBoxesHTML(item);
 }
 
 function closeChecklistMatrix(){
   document.getElementById('cmModal').classList.remove('open');
 }
 
-function cmUpdateCase(itemId, caseQty, qty){
-  const el = document.getElementById('cm-case-'+itemId);
-  if(!el) return;
-  const q = parseInt(qty)||0;
-  if(!caseQty || caseQty<=0 || q<=0){ el.textContent=''; return; }
-  const whole = Math.floor(q/caseQty);
-  const rem = q % caseQty;
-  el.textContent = rem===0 ? whole+'箱' : whole+'箱+'+rem;
-}
-
 function cmClearAll(){
   if(!_cmData) return;
-  _cmData.groups.forEach(g=>{
-    _cmData.colorOrder.forEach(c=>{
-      const item = _cmData.cellMap[c][g.name];
-      if(!item) return;
-      const inp = document.getElementById('cm-inp-'+item.id);
-      if(inp) inp.value = 0;
-      const lbl = document.getElementById('cm-case-'+item.id);
-      if(lbl) lbl.textContent = '';
-    });
-  });
+  _cmCaseCounts = {};
+  _cmFallbackQty = {};
+  cmRenderTable();
 }
 
 function reflectChecklistToPallet(){
@@ -1111,8 +1145,9 @@ function reflectChecklistToPallet(){
     _cmData.colorOrder.forEach(c=>{
       const item = _cmData.cellMap[c][g.name];
       if(!item) return;
-      const inp = document.getElementById('cm-inp-'+item.id);
-      const qty = parseInt(inp?.value)||0;
+      const qty = (item.caseQty && item.caseQty>0)
+        ? (_cmCaseCounts[item.id]||0) * item.caseQty
+        : (_cmFallbackQty[item.id]||0);
       if(qty <= 0) return;
       const existing = st.pallets[palIdx].rows.find(r=>r.itemId==item.id);
       if(existing){
@@ -1126,7 +1161,7 @@ function reflectChecklistToPallet(){
     });
   });
 
-  if(added===0){ toast('数量を入力してください'); return; }
+  if(added===0){ toast('チェックを入れてください（端数は品目タイルから「バラに追加」してください）'); return; }
   saveLocalState(); renderPallets(); renderBara(); renderMaterial(); renderItemTiles();
   saveShippingWork();
   closeChecklistMatrix();
