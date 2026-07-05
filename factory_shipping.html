@@ -1035,7 +1035,6 @@ function buildChecklistMatrix(){
   const colorDispMap = {};
   items.forEach(m=>{
     const c = m.color || '(指定なし)';
-    console.log('[DEBUG color]', m.name, 'color=', JSON.stringify(m.color), 'dispColor=', JSON.stringify(m.dispColor));
     if(!colorSeen.has(c)){
       colorSeen.add(c);
       colorOrder.push(c);
@@ -1081,6 +1080,11 @@ function openChecklistMatrix(){
   document.getElementById('cmModal').classList.add('open');
 }
 
+// 縦書き表示用：長音符「ー」は横棒に見えてしまうため、縦棒に見える文字に置き換える
+function toVerticalLabel(text){
+  return text.split('').map(ch => ch==='ー' ? '｜' : ch).join('<br>');
+}
+
 function cmRenderTable(){
   const {groups, colorOrder, colorDispMap, cellMap} = _cmData;
   const theadCols = groups.map(g=>`<th>${esc(g.dispName)}</th>`).join('');
@@ -1090,7 +1094,7 @@ function cmRenderTable(){
       if(!item) return `<td class="cm-empty"></td>`;
       return `<td><div id="cm-cell-${esc(item.id)}">${cmCellHTML(item)}</div></td>`;
     }).join('');
-    return `<tr><th><div class="cm-color-label">${esc(colorDispMap[c]||c).split('').join('<br>')}</div></th>${cells}</tr>`;
+    return `<tr><th><div class="cm-color-label">${toVerticalLabel(esc(colorDispMap[c]||c))}</div></th>${cells}</tr>`;
   }).join('');
 
   document.getElementById('cmTableHolder').innerHTML =
