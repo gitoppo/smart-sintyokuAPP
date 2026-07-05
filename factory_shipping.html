@@ -92,6 +92,19 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .editSlipBody{padding:10px;}
 .editRow{display:grid;grid-template-columns:1fr 80px 32px;gap:6px;align-items:center;margin-bottom:6px;}
 
+/* ===== 材料在庫 設定モーダル ===== */
+#msSettingsModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9992;display:none;align-items:center;justify-content:center;}
+#msSettingsModal.open{display:flex;}
+#msSettingsModalInner{background:#fff;border-radius:8px;padding:20px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto;}
+.msGroupRow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f0f0f0;}
+.msGroupRow label{flex:1;font-size:13px;}
+.msGroupRow input[type=number]{width:80px;font-size:14px;padding:4px 6px;border:1px solid #ccc;border-radius:6px;}
+.msStockTable{width:100%;border-collapse:collapse;font-size:13px;}
+.msStockTable th,.msStockTable td{border:1px solid #ddd;padding:6px 8px;text-align:center;}
+.msStockTable th{background:#1a1a2e;color:#fff;}
+.msStockTable td.ms-qty-low{color:#c0392b;font-weight:bold;}
+.msMoveRow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:12px;}
+
 /* ===== チェックリストマトリクスモーダル ===== */
 #cmModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9991;display:none;align-items:center;justify-content:center;}
 #cmModal.open{display:flex;}
@@ -157,7 +170,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 @media print{
   @page{margin:10mm;size:A4 portrait;}
   body{background:#fff;font-size:10.5pt;}
-  #tabBar,#toast,#loading,#editModal,#cmModal,#bs,#bs-overlay,.no-print{display:none!important;}
+  #tabBar,#toast,#loading,#editModal,#cmModal,#msSettingsModal,#bs,#bs-overlay,.no-print{display:none!important;}
   .tabContent{display:none!important;}
   #printArea{display:block!important;}
 
@@ -233,6 +246,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
   <button class="tab" onclick="showTab('tabMaterial')">②使用<br>材料</button>
   <button class="tab" onclick="showTab('tabHistory')">③出荷<br>履歴</button>
   <button class="tab" onclick="showTab('tabInvoice')">④請求書</button>
+  <button class="tab" onclick="showTab('tabMaterialStock')">⑤材料<br>在庫</button>
   <button class="tab" onclick="showTab('tabSettings')">⚙️<br>設定</button>
 </div>
 
@@ -336,6 +350,73 @@ tr:nth-child(even) td{background:#f9f9f9;}
   </div>
 </div>
 
+<!-- ⑤材料在庫タブ -->
+<div id="tabMaterialStock" class="tabContent">
+  <div class="card">
+    <div class="cardTitle">材料在庫（客先支給品）</div>
+    <div style="font-size:12px;color:#666;margin-bottom:10px;">
+      出荷分は、出荷履歴から自動的に差し引かれます。入荷・返品はこの画面で入力してください。
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <button class="btn-gray btn-sm" onclick="openMaterialStockSettings()">⚙️ 対象グループ・起点在庫の設定</button>
+      <button class="btn-success no-print" onclick="printMaterialStock()">🖨 在庫表を印刷</button>
+    </div>
+    <div id="materialStockTable"></div>
+  </div>
+
+  <div class="card">
+    <div class="cardTitle">入荷・返品の登録</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div>
+        <label style="font-size:12px;color:#666;">日付</label>
+        <input type="date" id="msMoveDate" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666;">区分</label>
+        <select id="msMoveType" style="width:100%;">
+          <option value="入荷">入荷（客先から受入）</option>
+          <option value="返品">返品（客先へ返却）</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666;">品目グループ</label>
+        <select id="msMoveGroup" style="width:100%;"></select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666;">数量</label>
+        <input type="number" min="0" id="msMoveQty" style="width:100%;">
+      </div>
+    </div>
+    <input type="text" id="msMoveMemo" placeholder="メモ（任意）" style="width:100%;margin-bottom:8px;">
+    <button class="btn-primary" onclick="addMaterialMovement()">＋ 登録</button>
+  </div>
+
+  <div class="card">
+    <div class="cardTitle">入荷・返品 履歴</div>
+    <div id="materialMovementList"></div>
+  </div>
+</div>
+
+<!-- 材料在庫 設定モーダル -->
+<div id="msSettingsModal">
+  <div id="msSettingsModalInner">
+    <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">⚙️ 材料在庫：対象グループ・起点在庫の設定</div>
+    <div style="font-size:12px;color:#666;margin-bottom:10px;">
+      在庫管理の対象にするグループにチェックを入れ、その時点（起点日）での在庫数を入力してください。<br>
+      起点日以降の入荷・返品（この画面での入力分）と出荷（出荷履歴）が自動的に加減算されます。
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;color:#666;">起点日</label>
+      <input type="date" id="msBaselineDate" style="width:100%;">
+    </div>
+    <div id="msGroupSettingsList" style="max-height:50vh;overflow-y:auto;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn-success" onclick="saveMaterialStockSettingsFromModal()">💾 保存</button>
+      <button class="btn-gray" onclick="closeMaterialStockSettings()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
 <!-- ⚙️設定タブ -->
 <div id="tabSettings" class="tabContent">
   <div class="card">
@@ -424,7 +505,8 @@ let st = {
   progress: {},
   pallets: [],
   bara: [],
-  deliveryHistory: []
+  deliveryHistory: [],
+  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '' }, movements: [] }
   // deliveryHistory の各レコード:
   // { id, timestamp, deviceName, shippingDate, memo,
   //   slips: [{slipNo, groupName, rows:[{itemId,name,color,qty,price}], subtotal, tax, total}],
@@ -449,11 +531,16 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // 使用材料の集計日も今日に初期化
   const matDate = document.getElementById('materialDate');
   if(matDate && !matDate.value) matDate.value = today();
+  const msDate = document.getElementById('msMoveDate');
+  if(msDate && !msDate.value) msDate.value = today();
   renderItemTiles();
   renderPallets();
   renderBara();
   renderMaterial();
   renderHistory();
+  renderMaterialStockTable();
+  renderMaterialMovementList();
+  populateMaterialGroupSelect();
   if(settings.gasUrl){ loadFromGas(); startPolling(); }
 });
 
@@ -501,7 +588,8 @@ function saveLocalState(){
     progress: st.progress,
     pallets: st.pallets,
     bara: st.bara,
-    deliveryHistory: st.deliveryHistory
+    deliveryHistory: st.deliveryHistory,
+    materialStock: st.materialStock
   }));
 }
 function loadLocalState(){
@@ -514,6 +602,7 @@ function loadLocalState(){
     st.pallets         = d.pallets         || [];
     st.bara            = d.bara            || [];
     st.deliveryHistory = d.deliveryHistory || [];
+    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:''}, movements:[]};
   }
   if(st.pallets.length === 0) st.pallets.push(newPallet());
   if(st.bara.length === 0)    st.bara.push({itemId:'',qty:''});
@@ -609,7 +698,14 @@ async function loadFromGas(){
       }
       saveLocalState();
     }
+    const msData = await gasGet('getMaterialStock');
+    if(msData && msData.ok){
+      st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:''};
+      st.materialStock.movements = msData.movements || [];
+      saveLocalState();
+    }
     renderItemTiles(); renderPallets(); renderBara(); renderMaterial(); renderHistory();
+    renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
     toast('データを読み込みました');
   }catch(e){ toast('読み込みエラー: '+e.message); }
   finally{ showLoading(false); }
@@ -2042,6 +2138,223 @@ function printInvoice(){
 }
 
 // ===== タブ切り替え =====
+// ===== 材料在庫（客先支給の板金加工品在庫管理） =====
+
+// 品目マスターから、グループ一覧（登場順・重複なし）を取得
+function getMaterialGroupList(){
+  const seen = new Set();
+  const list = [];
+  st.itemMaster.forEach(m=>{
+    const g = m.group || 'その他';
+    if(!seen.has(g)){
+      seen.add(g);
+      list.push({name:g, dispName:m.dispName||g});
+    }
+  });
+  return list;
+}
+
+// 出荷履歴から、指定グループ・指定日以降の出荷済み合計数量を取得
+function getShippedQtyByGroup(group, afterDate){
+  let total = 0;
+  st.deliveryHistory.forEach(r=>{
+    if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
+    if(!r.shippingDate || r.shippingDate <= afterDate) return;
+    (r.slips||[]).forEach(s=>{
+      if(s.groupName!==group) return;
+      (s.rows||[]).forEach(row=>{ total += parseInt(row.qty)||0; });
+    });
+  });
+  return total;
+}
+
+// 現在庫数を算出：起点在庫 + 入荷 − 返品 − 出荷（起点日より後の分）
+function computeMaterialStock(){
+  const settings = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:''};
+  const baselineDate = settings.baselineDate || '0000-00-00';
+  const enabled = settings.enabledGroups || [];
+  const groups = getMaterialGroupList().filter(g=>enabled.includes(g.name));
+
+  return groups.map(g=>{
+    const baseline = parseInt(settings.baseline?.[g.name])||0;
+    let nyuka = 0, henpin = 0;
+    st.materialStock.movements.forEach(m=>{
+      if(m.group!==g.name || !m.date || m.date<=baselineDate) return;
+      if(m.type==='入荷') nyuka += parseInt(m.qty)||0;
+      else if(m.type==='返品') henpin += parseInt(m.qty)||0;
+    });
+    const shukka = getShippedQtyByGroup(g.name, baselineDate);
+    const qty = baseline + nyuka - henpin - shukka;
+    return {group:g.name, dispName:g.dispName, qty};
+  });
+}
+
+function renderMaterialStockTable(){
+  const el = document.getElementById('materialStockTable');
+  if(!el) return;
+  const settings = st.materialStock.settings||{};
+  if(!settings.baselineDate || !(settings.enabledGroups||[]).length){
+    el.innerHTML = '<p style="color:#999;font-size:12px;padding:8px;">「⚙️ 対象グループ・起点在庫の設定」から設定してください</p>';
+    return;
+  }
+  const rows = computeMaterialStock();
+  el.innerHTML = `
+    <table class="msStockTable">
+      <thead><tr><th>品目グループ</th><th>現在庫数</th></tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr><td style="text-align:left;">${esc(r.dispName)}</td><td class="${r.qty<0?'ms-qty-low':''}">${r.qty}</td></tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:#999;margin-top:6px;">起点日：${esc(settings.baselineDate)}　更新：${today()}時点</div>
+  `;
+}
+
+function populateMaterialGroupSelect(){
+  const sel = document.getElementById('msMoveGroup');
+  if(!sel) return;
+  const enabled = (st.materialStock.settings||{}).enabledGroups||[];
+  const groups = getMaterialGroupList().filter(g=>enabled.includes(g.name));
+  sel.innerHTML = groups.map(g=>`<option value="${esc(g.name)}">${esc(g.dispName)}</option>`).join('');
+}
+
+async function addMaterialMovement(){
+  const date = document.getElementById('msMoveDate').value;
+  const type = document.getElementById('msMoveType').value;
+  const group = document.getElementById('msMoveGroup').value;
+  const qty = parseInt(document.getElementById('msMoveQty').value)||0;
+  const memo = document.getElementById('msMoveMemo').value.trim();
+  if(!date){ toast('日付を入力してください'); return; }
+  if(!group){ toast('対象グループを設定してください（⚙️設定）'); return; }
+  if(qty<=0){ toast('数量を入力してください'); return; }
+
+  const movement = {
+    id:'mm_'+Date.now(), date, type, group, qty, memo,
+    deviceName:settings.deviceName||'', timestamp:new Date().toISOString()
+  };
+  st.materialStock.movements.push(movement);
+  saveLocalState();
+  renderMaterialStockTable(); renderMaterialMovementList();
+  document.getElementById('msMoveQty').value='';
+  document.getElementById('msMoveMemo').value='';
+
+  if(settings.gasUrl){
+    showLoading(true);
+    try{
+      const res = await gasPost({action:'saveMaterialMovement', movement});
+      if(!res || !res.ok) toast('GAS保存エラー: '+(res?res.error:'不明'));
+      else toast('登録しました');
+    }catch(e){ toast('通信エラー: '+e.message); }
+    finally{ showLoading(false); }
+  } else {
+    toast('登録しました（ローカルのみ）');
+  }
+}
+
+function renderMaterialMovementList(){
+  const el = document.getElementById('materialMovementList');
+  if(!el) return;
+  const list = [...st.materialStock.movements].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.timestamp||'').localeCompare(a.timestamp||''));
+  if(list.length===0){
+    el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">登録された入荷・返品はありません</p>';
+    return;
+  }
+  const groupDispMap = {};
+  getMaterialGroupList().forEach(g=>groupDispMap[g.name]=g.dispName);
+  el.innerHTML = list.map(m=>`
+    <div class="msMoveRow">
+      <span>${esc(m.date)}　${m.type==='入荷'?'📥':'📤'}${esc(m.type)}　${esc(groupDispMap[m.group]||m.group)}　×${m.qty}${m.memo?'　'+esc(m.memo):''}</span>
+      <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
+    </div>
+  `).join('');
+}
+
+async function deleteMaterialMovementUI(id){
+  if(!confirm('この入荷・返品の記録を削除しますか？')) return;
+  st.materialStock.movements = st.materialStock.movements.filter(m=>m.id!==id);
+  saveLocalState();
+  renderMaterialStockTable(); renderMaterialMovementList();
+  if(settings.gasUrl){
+    try{ await gasPost({action:'deleteMaterialMovement', id}); }
+    catch(e){ toast('GAS削除エラー: '+e.message); }
+  }
+}
+
+function openMaterialStockSettings(){
+  const groups = getMaterialGroupList();
+  const settingsObj = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:''};
+  document.getElementById('msBaselineDate').value = settingsObj.baselineDate||'';
+  document.getElementById('msGroupSettingsList').innerHTML = groups.map(g=>{
+    const checked = (settingsObj.enabledGroups||[]).includes(g.name);
+    const baseVal = settingsObj.baseline?.[g.name] ?? '';
+    return `<div class="msGroupRow">
+      <input type="checkbox" id="ms-en-${esc(g.name)}" ${checked?'checked':''}>
+      <label for="ms-en-${esc(g.name)}">${esc(g.dispName)}</label>
+      <input type="number" min="0" id="ms-base-${esc(g.name)}" placeholder="起点在庫" value="${baseVal}">
+    </div>`;
+  }).join('');
+  document.getElementById('msSettingsModal').classList.add('open');
+}
+
+function closeMaterialStockSettings(){
+  document.getElementById('msSettingsModal').classList.remove('open');
+}
+
+async function saveMaterialStockSettingsFromModal(){
+  const groups = getMaterialGroupList();
+  const baselineDate = document.getElementById('msBaselineDate').value;
+  if(!baselineDate){ toast('起点日を入力してください'); return; }
+  const enabledGroups = [];
+  const baseline = {};
+  groups.forEach(g=>{
+    const cb = document.getElementById('ms-en-'+g.name);
+    if(cb && cb.checked){
+      enabledGroups.push(g.name);
+      baseline[g.name] = parseInt(document.getElementById('ms-base-'+g.name).value)||0;
+    }
+  });
+  const newSettings = {enabledGroups, baseline, baselineDate};
+  st.materialStock.settings = newSettings;
+  saveLocalState();
+  closeMaterialStockSettings();
+  renderMaterialStockTable(); populateMaterialGroupSelect();
+
+  if(settings.gasUrl){
+    showLoading(true);
+    try{
+      const res = await gasPost({action:'saveMaterialStockSettings', settings:newSettings});
+      if(!res || !res.ok) toast('GAS保存エラー: '+(res?res.error:'不明'));
+      else toast('設定を保存しました');
+    }catch(e){ toast('通信エラー: '+e.message); }
+    finally{ showLoading(false); }
+  } else {
+    toast('設定を保存しました（ローカルのみ）');
+  }
+}
+
+function printMaterialStock(){
+  const rows = computeMaterialStock();
+  if(rows.length===0){ toast('対象グループを設定してください'); return; }
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  const html = `
+    <div style="padding:10mm;font-family:sans-serif;">
+      <div style="font-size:16pt;font-weight:bold;margin-bottom:4mm;">材料在庫表　（${esc(settings.clientName||'')} 様）</div>
+      <div style="font-size:10pt;color:#555;margin-bottom:6mm;">${dateStr} 時点</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11pt;">
+        <thead><tr>
+          <th style="border:1px solid #000;padding:4px 8px;background:#eee;">品目グループ</th>
+          <th style="border:1px solid #000;padding:4px 8px;background:#eee;">在庫数</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr><td style="border:1px solid #000;padding:4px 8px;">${esc(r.dispName)}</td><td style="border:1px solid #000;padding:4px 8px;text-align:center;">${r.qty}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  document.getElementById('printArea').innerHTML = html;
+  window.print();
+}
+
 function showTab(id){
   const tabs=['tabPallet','tabMaterial','tabHistory','tabInvoice','tabSettings'];
   document.querySelectorAll('.tabContent').forEach(el=>el.classList.remove('active'));
