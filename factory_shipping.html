@@ -758,6 +758,7 @@ async function saveShippingWork(){
   // 保存前チェック：他端末が自分の知らない間に更新していないか確認（上書き事故防止）
   try{
     const check = await gasGet('getShipping');
+    console.log('[DEBUG saveShippingWork] server.updatedAt=', check?.workData?.updatedAt, ' local.lastSyncedWorkAt=', st.lastSyncedWorkAt);
     if(check && check.ok && check.workData && check.workData.updatedAt && check.workData.updatedAt !== st.lastSyncedWorkAt){
       // 他端末の方が新しい → 今回の保存は中止し、最新を取り込んで警告する
       if(check.workData.pallets) st.pallets = check.workData.pallets;
