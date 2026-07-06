@@ -204,8 +204,9 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .slip-info{display:flex;justify-content:space-between;font-size:8pt;margin-bottom:0.5mm;}
   .slip-meta{font-size:7.5pt;margin-bottom:0.5mm;}
   .slip-table{width:100%;border-collapse:collapse;font-size:11pt;table-layout:fixed;}
-  .slip-table th,.slip-table td{border:1px solid #000;height:18px;padding:0 0.8mm;line-height:18px;white-space:nowrap;overflow:hidden;}
-  .cell-fit{display:inline-block;transform-origin:left center;white-space:nowrap;}
+  .slip-table th,.slip-table td{border:1px solid #000;height:18px;padding:0 0.8mm;line-height:18px;white-space:nowrap;overflow:hidden;text-align:center;}
+  .slip-table th{letter-spacing:0.3em;}
+  .cell-fit{display:inline-block;transform-origin:center;white-space:nowrap;}
   .slip-table th{background:#eee;}
   .slip-total{text-align:right;font-size:8pt;margin-top:1mm;}
 
@@ -1806,14 +1807,14 @@ function buildSlipHTML(slip,date,memo){
       </div>
     </div>
     <table class="slip-table">
-      <thead><tr><th style="width:35%;">カラー</th><th style="width:10%;text-align:right;">数量</th><th style="width:15%;text-align:right;">単価</th><th style="width:20%;text-align:right;">金額</th><th style="width:20%;">備考</th></tr></thead>
+      <thead><tr><th style="width:35%;">カラー</th><th style="width:10%;">数量</th><th style="width:15%;">単価</th><th style="width:20%;">金額</th><th style="width:20%;">備考</th></tr></thead>
       <tbody>
         ${(()=>{
           const dataRows = slip.rows.map(r=>`<tr>
             <td><span class="cell-fit">${esc(r.color)}</span></td>
-            <td style="text-align:right;">${r.qty}</td>
-            <td style="text-align:right;">${r.price?'￥'+r.price.toLocaleString():''}</td>
-            <td style="text-align:right;">${r.amount?'￥'+r.amount.toLocaleString():''}</td>
+            <td>${r.qty}</td>
+            <td>${r.price?'￥'+r.price.toLocaleString():''}</td>
+            <td>${r.amount?'￥'+r.amount.toLocaleString():''}</td>
             <td style="font-size:8pt;"><span class="cell-fit">${esc(r.memo||'')}</span></td>
           </tr>`);
           // 8行固定：空行で埋める
@@ -1821,17 +1822,17 @@ function buildSlipHTML(slip,date,memo){
           return dataRows.join('');
         })()}
         <tr style="border-top:1px solid #000;">
-          <td style="text-align:right;">合計</td>
-          <td style="text-align:right;">${totalQty}</td>
+          <td>合計</td>
+          <td>${totalQty}</td>
           <td></td>
-          <td style="text-align:right;">${slip.subtotal?'￥'+slip.subtotal.toLocaleString():''}</td>
+          <td>${slip.subtotal?'￥'+slip.subtotal.toLocaleString():''}</td>
           <td></td>
         </tr>
         <tr>
-          <td style="text-align:right;">消費税(10%)</td>
-          <td style="text-align:right;">${slip.tax?'￥'+slip.tax.toLocaleString():''}</td>
-          <td style="text-align:right;">税込合計</td>
-          <td style="text-align:right;">${slip.total?'￥'+slip.total.toLocaleString():''}</td>
+          <td>消費税(10%)</td>
+          <td>${slip.tax?'￥'+slip.tax.toLocaleString():''}</td>
+          <td>税込合計</td>
+          <td>${slip.total?'￥'+slip.total.toLocaleString():''}</td>
           <td></td>
         </tr>
       </tbody>
@@ -2442,6 +2443,7 @@ function printMaterialStock(){
     <div class="slip-page">
       <div class="slip-unit">${cutMarks}${buildTable('')}</div>
       <div class="slip-unit">${cutMarks}${buildTable('（控え）')}</div>
+      <div class="slip-unit">${cutMarks}</div>
     </div>
   `;
   document.getElementById('printArea').innerHTML = html;
