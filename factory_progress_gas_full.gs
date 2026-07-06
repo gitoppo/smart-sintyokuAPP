@@ -633,8 +633,19 @@ function getShipping_() {
       });
       return obj;
     });
+
+    // パレット入力中データ（shippingWork）も合わせて返す（端末間共有のため）
+    let workData = null;
+    const workSheet = ss.getSheetByName('shippingWork');
+    if (workSheet && workSheet.getLastRow() >= 2) {
+      const raw = workSheet.getRange(2, 1).getValue();
+      if (raw) {
+        try { workData = JSON.parse(raw); } catch (e) { workData = null; }
+      }
+    }
+
     return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, deliveryHistory: records }))
+      .createTextOutput(JSON.stringify({ ok: true, deliveryHistory: records, workData: workData }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch(err) {
     return ContentService
