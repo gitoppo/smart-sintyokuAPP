@@ -754,6 +754,22 @@ async function archiveOperationLog(){
 // ===== 作業中データ保存 =====
 async function saveShippingWork(){
   if(!settings.gasUrl) return;
+
+  // 保存前チェック：他端末が自分の知らない間に更新していないか確認（上書き事故防止）
+  try{
+    const check = await gasGet('getShipping');
+    if(check && check.ok && check.workData && check.workData.updatedAt && check.workData.updatedAt !== st.lastSyncedWorkAt){
+      // 他端末の方が新しい → 今回の保存は中止し、最新を取り込んで警告する
+      if(check.workData.pallets) st.pallets = check.workData.pallets;
+      if(check.workData.bara)    st.bara    = check.workData.bara;
+      st.lastSyncedWorkAt = check.workData.updatedAt;
+      saveLocalState();
+      renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
+      toast('⚠️ 他の端末が先に更新しました。最新の内容に更新したので、操作をやり直してください');
+      return;
+    }
+  }catch(e){ console.warn('競合チェックエラー',e); /* チェック失敗時は通常通り保存を試みる */ }
+
   const workData = {
     pallets: st.pallets, bara: st.bara,
     shippingDate: document.getElementById('shippingDate').value,
