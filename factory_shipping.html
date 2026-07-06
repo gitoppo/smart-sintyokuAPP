@@ -199,12 +199,13 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .cut-mark-tr{top:0;right:0;}
   .cut-mark-bl{bottom:0;left:0;}
   .cut-mark-br{bottom:0;right:0;}
-  .delivery-slip{flex:1;padding:1.5mm 2.5mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;}
-  .slip-title{font-size:10.5pt;font-weight:bold;text-align:center;margin-bottom:0.5mm;}
+  .delivery-slip{flex:1;padding:1.5mm 2.5mm;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;font-family:'Noto Serif JP','Hiragino Mincho ProN','MS Mincho',serif;}
+  .slip-title{font-size:15pt;font-weight:bold;text-align:center;margin-bottom:0.5mm;}
   .slip-info{display:flex;justify-content:space-between;font-size:8pt;margin-bottom:0.5mm;}
   .slip-meta{font-size:7.5pt;margin-bottom:0.5mm;}
-  .slip-table{width:100%;border-collapse:collapse;font-size:11pt;}
-  .slip-table th,.slip-table td{border:1px solid #000;height:18px;padding:0 0.8mm;line-height:18px;}
+  .slip-table{width:100%;border-collapse:collapse;font-size:11pt;table-layout:fixed;}
+  .slip-table th,.slip-table td{border:1px solid #000;height:18px;padding:0 0.8mm;line-height:18px;white-space:nowrap;overflow:hidden;}
+  .cell-fit{display:inline-block;transform-origin:left center;white-space:nowrap;}
   .slip-table th{background:#eee;}
   .slip-total{text-align:right;font-size:8pt;margin-top:1mm;}
 
@@ -1758,6 +1759,7 @@ function printDelivery(grouped, existingRecord, startNo=1){
   }
   document.getElementById('printArea').innerHTML=printContent;
   closeBs();
+  fitSlipCellText();
   window.print();
 
   // 印刷後に履歴保存（新規or既存更新）
@@ -1773,13 +1775,27 @@ function printDelivery(grouped, existingRecord, startNo=1){
   }
 }
 
+// 納品書テーブルのセル文字を、はみ出す場合だけ横方向に縮めて1行に収める（列幅は変えない）
+function fitSlipCellText(){
+  document.querySelectorAll('.slip-table .cell-fit').forEach(span=>{
+    span.style.transform='none';
+    const td = span.parentElement;
+    const avail = td.clientWidth - 2; // 罫線・パディング分の余裕
+    const needed = span.scrollWidth;
+    if(needed > avail && avail > 0){
+      const scale = Math.max(avail / needed, 0.5); // 縮めすぎて読めなくならないよう下限50%
+      span.style.transform = `scaleX(${scale})`;
+    }
+  });
+}
+
 function buildSlipHTML(slip,date,memo){
   const totalQty = slip.rows.reduce((s,r)=>s+r.qty,0);
   return `
     <div class="slip-title">納品書</div>
     <div class="slip-info">
       <div>
-        <div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div>
+        <div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;font-size:13pt;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div>
         <div style="font-size:8pt;">${esc(settings.clientAddr)||''}</div>
         ${memo?`<div style="font-size:8pt;margin-top:0.5mm;">備考: ${esc(memo)}</div>`:''}
       </div>
@@ -1790,37 +1806,37 @@ function buildSlipHTML(slip,date,memo){
         <div style="margin-top:0.5mm;">出荷日: ${date}　伝票No: ${esc(slip.slipNo)}</div>
       </div>
     </div>
+    <div style="font-size:12pt;font-weight:bold;margin:1mm 0;">品名：${esc(slip.groupName)}</div>
     <table class="slip-table">
-      <thead><tr><th style="width:25%;">品目名</th><th style="width:15%;">カラー</th><th style="width:8%;text-align:right;">数量</th><th style="width:12%;text-align:right;">単価</th><th style="width:15%;text-align:right;">金額</th><th style="width:25%;">備考</th></tr></thead>
+      <thead><tr><th style="width:20%;">カラー</th><th style="width:10%;text-align:right;">数量</th><th style="width:15%;text-align:right;">単価</th><th style="width:20%;text-align:right;">金額</th><th style="width:35%;">備考</th></tr></thead>
       <tbody>
         ${(()=>{
           const dataRows = slip.rows.map(r=>`<tr>
-            <td>${esc(r.name)}</td>
-            <td>${esc(r.color)}</td>
+            <td><span class="cell-fit">${esc(r.color)}</span></td>
             <td style="text-align:right;">${r.qty}</td>
             <td style="text-align:right;">${r.price?r.price.toLocaleString():''}</td>
             <td style="text-align:right;">${r.amount?r.amount.toLocaleString():''}</td>
-            <td style="font-size:8pt;">${esc(r.memo||'')}</td>
+            <td style="font-size:8pt;"><span class="cell-fit">${esc(r.memo||'')}</span></td>
           </tr>`);
           // 8行固定：空行で埋める
-          while(dataRows.length < 8) dataRows.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>');
+          while(dataRows.length < 8) dataRows.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>');
           return dataRows.join('');
         })()}
         <tr style="border-top:1px solid #000;">
-          <td colspan="2" style="text-align:right;font-weight:bold;">合計</td>
-          <td style="text-align:right;font-weight:bold;">${totalQty}</td>
+          <td style="text-align:right;">合計</td>
+          <td style="text-align:right;">${totalQty}</td>
           <td></td>
-          <td style="text-align:right;font-weight:bold;">${slip.subtotal?slip.subtotal.toLocaleString():''}</td>
+          <td style="text-align:right;">${slip.subtotal?slip.subtotal.toLocaleString():''}</td>
           <td></td>
         </tr>
         <tr>
-          <td colspan="4" style="text-align:right;">消費税(10%)</td>
+          <td colspan="3" style="text-align:right;">消費税(10%)</td>
           <td style="text-align:right;">${slip.tax?slip.tax.toLocaleString():''}</td>
           <td></td>
         </tr>
         <tr>
-          <td colspan="4" style="text-align:right;font-weight:bold;">税込合計</td>
-          <td style="text-align:right;font-weight:bold;">${slip.total?slip.total.toLocaleString():''}</td>
+          <td colspan="3" style="text-align:right;">税込合計</td>
+          <td style="text-align:right;">${slip.total?slip.total.toLocaleString():''}</td>
           <td></td>
         </tr>
       </tbody>
@@ -2471,5 +2487,3 @@ function showLoading(v){
 </script>
 </body>
 </html>
-
-
