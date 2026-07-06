@@ -194,7 +194,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .slip-divider{height:8mm;flex-shrink:0;position:relative;box-sizing:border-box;}
   .slip-divider{display:none;}
   .slip-unit{position:relative;}
-  .cut-mark{position:absolute;width:5mm;height:0;border-top:1px dashed #000;}
+  .cut-mark{position:absolute;width:5mm;height:0;border-top:0.5px dashed #000;}
   .cut-mark-tl{top:0;left:0;}
   .cut-mark-tr{top:0;right:0;}
   .cut-mark-bl{bottom:0;left:0;}
@@ -220,7 +220,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .checklist-row .checklist-cell:first-child{padding-left:1mm;padding-right:7mm;}
   .checklist-row .checklist-cell:last-child{padding-left:7mm;padding-right:1mm;}
   .checklist-cutline{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;}
-  .checklist-cutline-line{width:12mm;border-top:1px dashed #000;flex:none;}
+  .checklist-cutline-line{width:12mm;border-top:0.5px dashed #000;flex:none;}
   .checklist-cutline-label{display:none;}
   .checklist-pallet{height:100%;box-sizing:border-box;}
   .checklist-pallet-inner{height:100%;box-sizing:border-box;}
@@ -2415,13 +2415,13 @@ function printMaterialStock(){
   const rows = computeMaterialStock();
   if(rows.length===0){ toast('対象グループを設定してください'); return; }
   const d = new Date();
-  const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
   const weekdays = ['日','月','火','水','木','金','土'];
   const dateLabel = `${d.getMonth()+1}/${d.getDate()}(${weekdays[d.getDay()]})`;
   const yearMonth = `${d.getFullYear()}年${d.getMonth()+1}月`;
+  const cutMarks = `<div class="cut-mark cut-mark-tl"></div><div class="cut-mark cut-mark-tr"></div><div class="cut-mark cut-mark-bl"></div><div class="cut-mark cut-mark-br"></div>`;
 
   const buildTable = (label) => `
-    <div style="margin-bottom:3mm;">
+    <div style="padding:4mm 6mm;box-sizing:border-box;height:100%;">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2mm;">
         <div style="font-size:12pt;font-weight:bold;">${yearMonth}</div>
         <div style="font-size:13pt;font-weight:bold;">材料在庫一覧${label?'　'+label:''}</div>
@@ -2439,10 +2439,9 @@ function printMaterialStock(){
   `;
 
   const html = `
-    <div style="padding:8mm;font-family:sans-serif;">
-      ${buildTable('')}
-      <div style="text-align:center;margin:6mm 0;">－－－－－－－－ 切り取り線 －－－－－－－－</div>
-      ${buildTable('（控え）')}
+    <div class="slip-page">
+      <div class="slip-unit">${cutMarks}${buildTable('')}</div>
+      <div class="slip-unit">${cutMarks}${buildTable('（控え）')}</div>
     </div>
   `;
   document.getElementById('printArea').innerHTML = html;
