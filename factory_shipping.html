@@ -511,7 +511,8 @@ let st = {
   pallets: [],
   bara: [],
   deliveryHistory: [],
-  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [] }
+  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [] },
+  lastSyncedWorkAt: ''
   // deliveryHistory の各レコード:
   // { id, timestamp, deviceName, shippingDate, memo,
   //   slips: [{slipNo, groupName, rows:[{itemId,name,color,qty,price}], subtotal, tax, total}],
@@ -594,7 +595,8 @@ function saveLocalState(){
     pallets: st.pallets,
     bara: st.bara,
     deliveryHistory: st.deliveryHistory,
-    materialStock: st.materialStock
+    materialStock: st.materialStock,
+    lastSyncedWorkAt: st.lastSyncedWorkAt
   }));
 }
 function loadLocalState(){
@@ -608,6 +610,7 @@ function loadLocalState(){
     st.bara            = d.bara            || [];
     st.deliveryHistory = d.deliveryHistory || [];
     st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[]};
+    st.lastSyncedWorkAt = d.lastSyncedWorkAt || '';
   }
   if(st.pallets.length === 0) st.pallets.push(newPallet());
   if(st.bara.length === 0)    st.bara.push({itemId:'',qty:''});
@@ -691,7 +694,7 @@ async function loadFromGas(){
           return r;
         });
       }
-      if(shData.workData && st.pallets.every(p=>p.rows.every(r=>!r.itemId))){
+      if(shData.workData && shData.workData.updatedAt !== st.lastSyncedWorkAt){
         if(shData.workData.pallets) st.pallets = shData.workData.pallets;
         if(shData.workData.bara)    st.bara    = shData.workData.bara;
         const dateEl = document.getElementById('shippingDate');
@@ -700,6 +703,7 @@ async function loadFromGas(){
         if(shData.workData.shippingDate && !dateEl.value) dateEl.value = shData.workData.shippingDate;
         if(shData.workData.deliveryNo)  noEl.value   = shData.workData.deliveryNo;
         if(shData.workData.memo)        memoEl.value = shData.workData.memo;
+        st.lastSyncedWorkAt = shData.workData.updatedAt;
       }
       saveLocalState();
     }
@@ -757,7 +761,11 @@ async function saveShippingWork(){
     memo:         document.getElementById('shippingMemo').value.trim(),
     updatedAt:    new Date().toISOString()
   };
-  try{ await gasPost({action:'saveShippingWork', workData}); }
+  try{
+    await gasPost({action:'saveShippingWork', workData});
+    st.lastSyncedWorkAt = workData.updatedAt; // 自分がpushした内容を最新として記録（次回起動時の誤った未同期判定を防ぐ）
+    saveLocalState();
+  }
   catch(e){ console.warn('作業中データ保存エラー',e); }
 }
 
@@ -769,10 +777,12 @@ function startPolling(){
     try{
       const shData = await gasGet('getShipping');
       if(!shData||!shData.workData) return;
+      if(shData.workData.updatedAt === st.lastSyncedWorkAt) return; // 変更なし
       const focused = document.activeElement;
       if(focused&&(focused.tagName==='INPUT'||focused.tagName==='SELECT'||focused.tagName==='TEXTAREA')) return;
       if(shData.workData.pallets) st.pallets = shData.workData.pallets;
       if(shData.workData.bara)    st.bara    = shData.workData.bara;
+      st.lastSyncedWorkAt = shData.workData.updatedAt;
       saveLocalState();
       renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
     }catch(e){}
