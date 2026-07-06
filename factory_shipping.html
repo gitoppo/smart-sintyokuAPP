@@ -1502,7 +1502,17 @@ function groupRowsByGroup(allRows){
     gMap[g][k].qty+=r.qty;
     if(r.memo) gMap[g][k].memo=r.memo;
   });
-  return Object.entries(gMap).map(([groupName,itemMap])=>({groupName,rows:Object.values(itemMap)}));
+  const result = Object.entries(gMap).map(([groupName,itemMap])=>({groupName,rows:Object.values(itemMap)}));
+
+  // 並び順を品目マスター（＝品目タイルの表示順）に揃える。関連グループが隣り合わせになり、伝票番号も連続しやすくなる
+  const groupOrder = {};
+  st.itemMaster.forEach(m=>{
+    const g = m.group || '未分類';
+    if(!(g in groupOrder)) groupOrder[g] = Object.keys(groupOrder).length;
+  });
+  result.sort((a,b)=>(groupOrder[a.groupName]??999) - (groupOrder[b.groupName]??999));
+
+  return result;
 }
 
 // 納品書履歴から品目・数量を集計してシート品番ごとに材料使用量を計算
