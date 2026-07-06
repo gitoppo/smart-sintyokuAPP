@@ -442,7 +442,6 @@ tr:nth-child(even) td{background:#f9f9f9;}
   <div class="card">
     <div class="cardTitle">得意先情報</div>
     <div class="settingRow"><label>得意先名</label><input type="text" id="clientName" placeholder="株式会社△△"></div>
-    <div class="settingRow"><label>得意先住所</label><input type="text" id="clientAddr" placeholder="東京都〇〇区..."></div>
   </div>
   <div class="card">
     <div class="cardTitle">端末・接続</div>
@@ -531,7 +530,7 @@ let st = {
 
 let settings = {
   companyName:'', companyAddr:'', companyTel:'',
-  clientName:'', clientAddr:'',
+  clientName:'',
   deviceName:'', gasUrl:''
 };
 
@@ -579,7 +578,6 @@ function loadSettings(){
   document.getElementById('companyAddr').value = settings.companyAddr||'';
   document.getElementById('companyTel').value  = settings.companyTel||'';
   document.getElementById('clientName').value  = settings.clientName||'';
-  document.getElementById('clientAddr').value  = settings.clientAddr||'';
   document.getElementById('deviceName').value  = settings.deviceName||'';
   document.getElementById('gasUrl').value      = settings.gasUrl||'';
 }
@@ -588,7 +586,6 @@ function saveSettings(){
   settings.companyAddr = document.getElementById('companyAddr').value.trim();
   settings.companyTel  = document.getElementById('companyTel').value.trim();
   settings.clientName  = document.getElementById('clientName').value.trim();
-  settings.clientAddr  = document.getElementById('clientAddr').value.trim();
   settings.deviceName  = document.getElementById('deviceName').value.trim();
   settings.gasUrl      = document.getElementById('gasUrl').value.trim();
   localStorage.setItem('shippingSettings', JSON.stringify(settings));
@@ -1796,7 +1793,7 @@ function buildSlipHTML(slip,date,memo){
     <div class="slip-info">
       <div>
         <div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;font-size:13pt;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div>
-        <div style="font-size:8pt;">${esc(settings.clientAddr)||''}</div>
+        <div style="font-size:9pt;">品名：${esc(slip.groupName)}</div>
         ${memo?`<div style="font-size:8pt;margin-top:0.5mm;">備考: ${esc(memo)}</div>`:''}
       </div>
       <div style="text-align:right;font-size:8pt;">
@@ -1806,9 +1803,8 @@ function buildSlipHTML(slip,date,memo){
         <div style="margin-top:0.5mm;">出荷日: ${date}　伝票No: ${esc(slip.slipNo)}</div>
       </div>
     </div>
-    <div style="font-size:12pt;font-weight:bold;margin:1mm 0;">品名：${esc(slip.groupName)}</div>
     <table class="slip-table">
-      <thead><tr><th style="width:20%;">カラー</th><th style="width:10%;text-align:right;">数量</th><th style="width:15%;text-align:right;">単価</th><th style="width:20%;text-align:right;">金額</th><th style="width:35%;">備考</th></tr></thead>
+      <thead><tr><th style="width:35%;">カラー</th><th style="width:10%;text-align:right;">数量</th><th style="width:15%;text-align:right;">単価</th><th style="width:20%;text-align:right;">金額</th><th style="width:20%;">備考</th></tr></thead>
       <tbody>
         ${(()=>{
           const dataRows = slip.rows.map(r=>`<tr>
@@ -1830,12 +1826,9 @@ function buildSlipHTML(slip,date,memo){
           <td></td>
         </tr>
         <tr>
-          <td colspan="3" style="text-align:right;">消費税(10%)</td>
+          <td style="text-align:right;">消費税(10%)</td>
           <td style="text-align:right;">${slip.tax?slip.tax.toLocaleString():''}</td>
-          <td></td>
-        </tr>
-        <tr>
-          <td colspan="3" style="text-align:right;">税込合計</td>
+          <td style="text-align:right;">税込合計</td>
           <td style="text-align:right;">${slip.total?slip.total.toLocaleString():''}</td>
           <td></td>
         </tr>
