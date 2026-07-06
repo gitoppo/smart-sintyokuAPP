@@ -1812,8 +1812,8 @@ function buildSlipHTML(slip,date,memo){
           const dataRows = slip.rows.map(r=>`<tr>
             <td><span class="cell-fit">${esc(r.color)}</span></td>
             <td style="text-align:right;">${r.qty}</td>
-            <td style="text-align:right;">${r.price?r.price.toLocaleString():''}</td>
-            <td style="text-align:right;">${r.amount?r.amount.toLocaleString():''}</td>
+            <td style="text-align:right;">${r.price?'￥'+r.price.toLocaleString():''}</td>
+            <td style="text-align:right;">${r.amount?'￥'+r.amount.toLocaleString():''}</td>
             <td style="font-size:8pt;"><span class="cell-fit">${esc(r.memo||'')}</span></td>
           </tr>`);
           // 8行固定：空行で埋める
@@ -1824,14 +1824,14 @@ function buildSlipHTML(slip,date,memo){
           <td style="text-align:right;">合計</td>
           <td style="text-align:right;">${totalQty}</td>
           <td></td>
-          <td style="text-align:right;">${slip.subtotal?slip.subtotal.toLocaleString():''}</td>
+          <td style="text-align:right;">${slip.subtotal?'￥'+slip.subtotal.toLocaleString():''}</td>
           <td></td>
         </tr>
         <tr>
           <td style="text-align:right;">消費税(10%)</td>
-          <td style="text-align:right;">${slip.tax?slip.tax.toLocaleString():''}</td>
+          <td style="text-align:right;">${slip.tax?'￥'+slip.tax.toLocaleString():''}</td>
           <td style="text-align:right;">税込合計</td>
-          <td style="text-align:right;">${slip.total?slip.total.toLocaleString():''}</td>
+          <td style="text-align:right;">${slip.total?'￥'+slip.total.toLocaleString():''}</td>
           <td></td>
         </tr>
       </tbody>
