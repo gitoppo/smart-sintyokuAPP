@@ -1796,7 +1796,7 @@ function buildSlipHTML(slip,date,memo){
           <div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;font-size:13pt;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div>
           ${memo?`<div style="font-size:8pt;margin-top:0.5mm;">備考: ${esc(memo)}</div>`:''}
         </div>
-        <div style="font-size:14pt;font-weight:bold;">品名：${esc(slip.groupName)}</div>
+        <div style="font-size:12pt;font-weight:bold;">品名：${esc(slip.groupName)}</div>
       </div>
       <div style="text-align:right;font-size:8pt;">
         <div style="font-size:8.5pt;">${esc(settings.companyName)||'自社名'}</div>
