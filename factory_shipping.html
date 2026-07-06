@@ -753,6 +753,7 @@ async function archiveOperationLog(){
 
 // ===== 作業中データ保存 =====
 async function saveShippingWork(){
+  console.log('[DEBUG] saveShippingWork called. gasUrl=', settings.gasUrl);
   if(!settings.gasUrl) return;
 
   // 保存前チェック：他端末が自分の知らない間に更新していないか確認（上書き事故防止）
@@ -808,6 +809,7 @@ function startPolling(){
 
 let _workSaveTimer=null;
 function debounceWorkSave(){
+  console.log('[DEBUG] debounceWorkSave called (2秒後にsaveShippingWorkが呼ばれます)');
   clearTimeout(_workSaveTimer);
   _workSaveTimer = setTimeout(()=>{ saveShippingWork(); }, 2000);
 }
