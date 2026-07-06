@@ -236,6 +236,12 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .invoice-print table{width:100%;border-collapse:collapse;}
   .invoice-print th,.invoice-print td{border:1px solid #000;padding:2mm 3mm;}
   .invoice-print th{background:#eee;}
+
+  /* 材料在庫表（横長・エクセル様式） */
+  .msPrintTable{width:100%;border-collapse:collapse;table-layout:fixed;font-size:8pt;}
+  .msPrintTable th,.msPrintTable td{border:1px solid #000;text-align:center;padding:1mm;overflow:hidden;word-break:break-all;}
+  .msPrintTable th{background:#eee;font-weight:bold;line-height:1.15;}
+  .msPrintTable td:first-child,.msPrintTable th:first-child{font-weight:bold;background:#f5f5f5;}
 }
 @media screen{#printArea{display:none;}}
 </style>
@@ -2389,19 +2395,33 @@ function printMaterialStock(){
   if(rows.length===0){ toast('対象グループを設定してください'); return; }
   const d = new Date();
   const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-  const html = `
-    <div style="padding:10mm;font-family:sans-serif;">
-      <div style="font-size:16pt;font-weight:bold;margin-bottom:4mm;">材料在庫表　（${esc(settings.clientName||'')} 様）</div>
-      <div style="font-size:10pt;color:#555;margin-bottom:6mm;">${dateStr} 時点</div>
-      <table style="width:100%;border-collapse:collapse;font-size:11pt;">
+  const weekdays = ['日','月','火','水','木','金','土'];
+  const dateLabel = `${d.getMonth()+1}/${d.getDate()}(${weekdays[d.getDay()]})`;
+  const yearMonth = `${d.getFullYear()}年${d.getMonth()+1}月`;
+
+  const buildTable = (label) => `
+    <div style="margin-bottom:3mm;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2mm;">
+        <div style="font-size:12pt;font-weight:bold;">${yearMonth}</div>
+        <div style="font-size:13pt;font-weight:bold;">材料在庫一覧${label?'　'+label:''}</div>
+      </div>
+      <table class="msPrintTable">
         <thead><tr>
-          <th style="border:1px solid #000;padding:4px 8px;background:#eee;">品目グループ</th>
-          <th style="border:1px solid #000;padding:4px 8px;background:#eee;">在庫数</th>
+          <th style="width:16mm;"></th>
+          ${rows.map(r=>`<th>${esc(r.dispName)}</th>`).join('')}
         </tr></thead>
         <tbody>
-          ${rows.map(r=>`<tr><td style="border:1px solid #000;padding:4px 8px;">${esc(r.dispName)}</td><td style="border:1px solid #000;padding:4px 8px;text-align:center;">${r.qty}</td></tr>`).join('')}
+          <tr><td>${dateLabel}</td>${rows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
         </tbody>
       </table>
+    </div>
+  `;
+
+  const html = `
+    <div style="padding:8mm;font-family:sans-serif;">
+      ${buildTable('')}
+      <div style="text-align:center;margin:6mm 0;">－－－－－－－－ 切り取り線 －－－－－－－－</div>
+      ${buildTable('（控え）')}
     </div>
   `;
   document.getElementById('printArea').innerHTML = html;
