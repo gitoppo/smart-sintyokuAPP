@@ -660,19 +660,20 @@ function saveShipping_(p) {
     let sheet = ss.getSheetByName('deliveryHistory');
     if (!sheet) {
       sheet = ss.insertSheet('deliveryHistory');
-      sheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate']);
+      sheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate','type']);
     }
+
+    // 既存シートに type 列が無ければ追加（後方互換：以前のシートにはこの列が無かったため）
+    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (headers.indexOf('type') === -1) {
+      sheet.getRange(1, headers.length + 1).setValue('type');
+      headers = headers.concat(['type']);
+    }
+
     const records = p.records || [];
-    records.forEach(r => {
-      sheet.appendRow([
-        r.id || '',
-        r.timestamp || '',
-        r.deviceName || '',
-        r.deliveryNo || '',
-        r.memo || '',
-        r.palletsJson || '',
-        r.shippingDate || ''
-      ]);
+    records.forEach(function (r) {
+      const row = headers.map(function (h) { return (r[h] !== undefined && r[h] !== null) ? r[h] : ''; });
+      sheet.appendRow(row);
     });
     return ContentService
       .createTextOutput(JSON.stringify({ ok: true }))
