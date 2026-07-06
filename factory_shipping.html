@@ -168,7 +168,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 
 /* ===== 印刷スタイル ===== */
 @media print{
-  @page{margin:10mm;size:A4 portrait;}
+  @page{margin:10mm 6mm;size:A4 portrait;}
   body{background:#fff;font-size:10.5pt;}
   #tabBar,#toast,#loading,#editModal,#cmModal,#msSettingsModal,#bs,#bs-overlay,.no-print{display:none!important;}
   .tabContent{display:none!important;}
@@ -215,7 +215,9 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .checklist-row{display:grid;grid-template-columns:1fr 1fr;gap:0;}
   .checklist-row-top .checklist-cell{height:138mm;}
   .checklist-row-bottom .checklist-cell{height:131mm;padding-top:10mm;}
-  .checklist-cell{box-sizing:border-box;overflow:hidden;padding:3mm;border:none;}
+  .checklist-cell{box-sizing:border-box;overflow:hidden;padding:3mm 4mm;border:none;}
+  .checklist-row .checklist-cell:first-child{padding-left:1mm;padding-right:7mm;}
+  .checklist-row .checklist-cell:last-child{padding-left:7mm;padding-right:1mm;}
   .checklist-cutline{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;}
   .checklist-cutline-line{width:12mm;border-top:1px dashed #000;flex:none;}
   .checklist-cutline-label{display:none;}
@@ -1836,7 +1838,13 @@ function buildChecklistBlocks(pallets, bara, date){
   return blocks;
 }
 
-// blocks配列 → 2列4パレットのページ割りHTMLを生成
+// 控え用に「タイトルに［控え］を付けた」コピーを作る
+function makeChecklistCopy(block){
+  if(!block) return '';
+  return block.replace('<div class="checklist-title">', '<div class="checklist-title">［控え］');
+}
+
+// blocks配列 → 1ページにつき2パレット分（各パレットの左＝本体・右＝控え）のページ割りHTMLを生成
 function paginateChecklistBlocks(blocks){
   const cutlineHTML=`<div class="checklist-cutline">
     <div class="checklist-cutline-line"></div>
@@ -1844,18 +1852,18 @@ function paginateChecklistBlocks(blocks){
     <div class="checklist-cutline-line"></div>
   </div>`;
   let printContent='';
-  for(let i=0; i<blocks.length; i+=4){
-    const group=blocks.slice(i,i+4);
-    while(group.length<4) group.push('');
+  for(let i=0; i<blocks.length; i+=2){
+    const group=blocks.slice(i,i+2);
+    while(group.length<2) group.push('');
     printContent+=`<div class="checklist-page">
       <div class="checklist-row checklist-row-top">
         <div class="checklist-cell">${group[0]}</div>
-        <div class="checklist-cell">${group[1]}</div>
+        <div class="checklist-cell">${makeChecklistCopy(group[0])}</div>
       </div>
       ${cutlineHTML}
       <div class="checklist-row checklist-row-bottom">
-        <div class="checklist-cell">${group[2]}</div>
-        <div class="checklist-cell">${group[3]}</div>
+        <div class="checklist-cell">${group[1]}</div>
+        <div class="checklist-cell">${makeChecklistCopy(group[1])}</div>
       </div>
     </div>`;
   }
