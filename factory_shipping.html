@@ -717,8 +717,19 @@ async function loadFromGas(){
     const msData = await gasGet('getMaterialStock');
     if(msData && msData.ok){
       st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
-      st.materialStock.movements = msData.movements || [];
+      const serverMovements = msData.movements || [];
+      const serverIds = new Set(serverMovements.map(m=>m.id));
+      // サーバーにまだ無い（未送信の可能性がある）ローカルの記録は消さずに残す
+      const localOnly = st.materialStock.movements.filter(m=>!serverIds.has(m.id));
+      st.materialStock.movements = [...serverMovements, ...localOnly];
       saveLocalState();
+      if(localOnly.length > 0){
+        // 念のため再送信を試みる（前回の保存が失敗していた場合の保険）
+        for(const m of localOnly){
+          try{ await gasPost({action:'saveMaterialMovement', movement:m}); }catch(e){}
+        }
+        toast(`未送信だった入荷・返品データ${localOnly.length}件を再送信しました`);
+      }
     }
     renderItemTiles(); renderPallets(); renderBara(); renderMaterial(); renderHistory();
     renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
