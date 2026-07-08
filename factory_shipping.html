@@ -2473,7 +2473,7 @@ async function exportInvoiceExcel(){
 
   cover.mergeCells('D11:E11');
   sc(cover,'C11','御請求額',{size:9,halign:'center'});
-  sc(cover,'D11','=G16',{size:12,halign:'center'});
+  sc(cover,'D11',{formula:'G16'},{size:12,halign:'center',fmt:YEN});
   if(settings.bankInfo2) sc(cover,'H11',settings.bankInfo2,{size:9});
 
   cover.mergeCells('C13:F13'); cover.mergeCells('G13:H13'); cover.mergeCells('I13:J13');
@@ -2492,12 +2492,12 @@ async function exportInvoiceExcel(){
   cover.mergeCells('C15:F15');
   sc(cover,'C15','当月分消費税　　10 ％',{size:11,halign:'center',bdr:true});
   cover.mergeCells('G15:H15');
-  sc(cover,'G15','=INT(G14*0.1)',{size:11,halign:'right',fmt:YEN,bdr:true});
+  sc(cover,'G15',{formula:'INT(G14*0.1)'},{size:11,halign:'right',fmt:YEN,bdr:true});
 
   cover.mergeCells('C16:F16');
   sc(cover,'C16','当　月　分　計',{size:11,halign:'center',bdr:true});
   cover.mergeCells('G16:H16');
-  sc(cover,'G16','=G14+G15',{size:11,halign:'right',fmt:YEN,bdr:true});
+  sc(cover,'G16',{formula:'G14+G15'},{size:11,halign:'right',fmt:YEN,bdr:true});
 
   // ===== 日付ごとの請求明細シート =====
   const usedSheetNames = new Set();
