@@ -565,6 +565,7 @@ let st = {
   deliveryHistory: [],
   materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [] },
   baraPrintTarget: true,
+  baraChecklistPrinted: false,
   lastSyncedWorkAt: ''
   // deliveryHistory の各レコード:
   // { id, timestamp, deviceName, shippingDate, memo,
@@ -659,7 +660,8 @@ function saveLocalState(){
     deliveryHistory: st.deliveryHistory,
     materialStock: st.materialStock,
     lastSyncedWorkAt: st.lastSyncedWorkAt,
-    baraPrintTarget: st.baraPrintTarget
+    baraPrintTarget: st.baraPrintTarget,
+    baraChecklistPrinted: st.baraChecklistPrinted
   }));
 }
 function loadLocalState(){
@@ -675,6 +677,7 @@ function loadLocalState(){
     st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[]};
     st.lastSyncedWorkAt = d.lastSyncedWorkAt || '';
     st.baraPrintTarget = d.baraPrintTarget !== false;
+    st.baraChecklistPrinted = d.baraChecklistPrinted === true;
   }
   if(st.pallets.length === 0) st.pallets.push(newPallet());
   if(st.bara.length === 0)    st.bara.push({itemId:'',qty:''});
@@ -1164,6 +1167,7 @@ function bsAddToBara(){
   });
 
   if(added===0){ toast('数量を入力してください'); return; }
+  st.baraChecklistPrinted = false; // 新規追加分は次回チェックリスト印刷の対象に戻す
   saveLocalState(); renderPallets(); renderBara(); renderMaterial(); renderItemTiles();
   saveShippingWork();
   closeBs();
@@ -1482,7 +1486,7 @@ function renderPallets(){
       <div class="palletBody">
         ${rowsHTML}
         ${totalCases>0?`<div class="pallet-total">合計箱数: ${totalCases}箱</div>`:''}
-      </div>${p.printTarget===false?'<div style="background:#fff3cd;color:#856404;font-size:11px;padding:4px 8px;">⚠ このパレットは印刷対象から除外されています（積み増し中など）</div>':''}
+      </div>${p.printTarget===false?'<div style="background:#fff3cd;color:#856404;font-size:11px;padding:4px 8px;">⚠ このパレットは印刷対象から除外されています（積み増し中など）</div>':''}${p.checklistPrinted?'<div style="background:#e2f0d9;color:#385723;font-size:11px;padding:4px 8px;">✅ チェックリスト印刷済み</div>':''}
     </div>`;
   }).join('');
 }
@@ -2068,13 +2072,38 @@ function openPrintChecklist(){
   const validPallets=st.pallets.filter(p=>p.rows.some(r=>r.itemId&&r.qty));
   const validBara=st.bara.filter(r=>r.itemId&&r.qty);
   if(validPallets.length===0 && validBara.length===0){ toast('品目を登録してください'); return; }
-  const date=document.getElementById('shippingDate').value||today();
 
-  const blocks = buildChecklistBlocks(st.pallets, st.bara, date);
+  const newPallets = validPallets.filter(p=>!p.checklistPrinted);
+  const includeBara = validBara.length>0 && !st.baraChecklistPrinted;
+
+  let targetPallets, targetBara;
+  if(newPallets.length===0 && !includeBara){
+    // 未印刷の品目が無い＝全部印刷済み。確認のうえ、希望があれば全部を再印刷する
+    if(!confirm('未印刷のパレット・バラはありません（すべて印刷済みです）。\n全パレット・バラを改めて印刷し直しますか？')) return;
+    targetPallets = validPallets;
+    targetBara = validBara;
+  } else {
+    // 通常は未印刷分だけを対象にする
+    const skippedCount = validPallets.length - newPallets.length;
+    if(skippedCount>0 || (validBara.length>0 && !includeBara)){
+      if(!confirm(`未印刷分（パレット${newPallets.length}件${includeBara?'＋バラ':''}）だけを印刷します。\n（印刷済みのパレット${skippedCount}件は除外されます）\n\nよろしいですか？`)) return;
+    }
+    targetPallets = newPallets;
+    targetBara = includeBara ? validBara : [];
+  }
+
+  const date=document.getElementById('shippingDate').value||today();
+  const blocks = buildChecklistBlocks(targetPallets, targetBara, date);
+  if(blocks.length===0){ toast('印刷対象がありません'); return; }
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
   closeBs();
   window.print();
   saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist');
+
+  // 印刷済みフラグを立てる（次回は除外される）
+  targetPallets.forEach(p=>{ p.checklistPrinted = true; });
+  if(targetBara.length>0) st.baraChecklistPrinted = true;
+  saveLocalState(); renderPallets(); debounceWorkSave();
 }
 
 // 履歴からの再印刷（保存時のpalletsSnapshotを使って再現）
