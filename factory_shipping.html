@@ -254,7 +254,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 }
 @media screen{#printArea{display:none;}}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 </head>
 <body>
 
@@ -2403,8 +2403,8 @@ function calcInvoice(){
 }
 
 // 日付ごとの明細シート＋合計請求書の表紙を1つのExcelファイルとして出力
-function exportInvoiceExcel(){
-  if(typeof XLSX==='undefined'){ toast('Excel出力ライブラリの読み込みに失敗しました。通信環境を確認してください'); return; }
+async function exportInvoiceExcel(){
+  if(typeof ExcelJS==='undefined'){ toast('Excel出力ライブラリの読み込みに失敗しました。通信環境を確認してください'); return; }
   const month = document.getElementById('invoiceMonth').value;
   if(!month){ toast('対象月を選択してください'); return; }
   const target = month.slice(0,7);
@@ -2416,6 +2416,9 @@ function exportInvoiceExcel(){
   );
   if(records.length===0){ toast('該当する納品書がありません'); return; }
 
+  showLoading(true);
+  try{
+
   // 出荷日ごとにグループ化
   const byDate = {};
   records.forEach(rec=>{
@@ -2424,77 +2427,137 @@ function exportInvoiceExcel(){
     byDate[d].push(rec);
   });
   const dates = Object.keys(byDate).sort();
-
-  const wb = XLSX.utils.book_new();
-  let grandSubtotal = 0;
-  let totalSlipCount = 0;
-  const usedSheetNames = new Set();
-
-  dates.forEach(dateStr=>{
+  const dateData = dates.map(dateStr=>{
     let allSlips = [];
     byDate[dateStr].forEach(rec=>{ allSlips = allSlips.concat(rec.slips||[]); });
     allSlips.sort((a,b)=>(a.slipNo||'').localeCompare(b.slipNo||''));
+    return {dateStr, allSlips};
+  });
 
-    const dateDisp = dateStr.replace(/-/g,'/');
-    const aoa = [
-      [`請求明細　${dateDisp}`],
-      [],
-      ['伝票No.','品名','数量','単位','単価','金額']
-    ];
-    let dateSubtotal = 0;
-    allSlips.forEach(s=>{
-      aoa.push([`【${s.slipNo}】 ${s.groupName}`]);
-      (s.rows||[]).forEach(r=>{
-        aoa.push([s.slipNo, r.color, r.qty, '枚', r.price||0, r.amount||0]);
-        dateSubtotal += r.amount||0;
-      });
-      totalSlipCount++;
-    });
-    aoa.push(['合計（税抜）','','','','',dateSubtotal]);
-    grandSubtotal += dateSubtotal;
+  // ===== 配色・書式（社内で使われているnohin-shu-keiスキルのテンプレートに準拠） =====
+  const NAVY  = 'FF1F3864', DBLUE = 'FF2E75B6', LBLUE = 'FFBDD7EE', STRIPE = 'FFF2F7FC', WHITE = 'FFFFFFFF';
+  const YEN = '¥#,##0', NUM = '#,##0';
+  const FONT = 'MS Gothic';
+  const THIN = {style:'thin', color:{argb:'FF000000'}};
+  const fill = argb => ({type:'pattern', pattern:'solid', fgColor:{argb}});
 
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{wch:14},{wch:16},{wch:8},{wch:6},{wch:10},{wch:12}];
+  const wb = new ExcelJS.Workbook();
 
-    // シート名はMMDD（重複時は連番を付与）
+  const sc = (ws,addr,val,opt={})=>{
+    const c = ws.getCell(addr);
+    c.value = val;
+    c.font = {name:FONT, size:opt.size||10, bold:!!opt.bold, color:{argb:opt.fg||'FF000000'}};
+    if(opt.bg) c.fill = fill(opt.bg);
+    c.alignment = {horizontal:opt.halign||'left', vertical:'middle'};
+    if(opt.fmt) c.numFmt = opt.fmt;
+    if(opt.bdr) c.border = {top:THIN, left:THIN, bottom:THIN, right:THIN};
+    return c;
+  };
+
+  // ===== 合計請求書（表紙）シート =====
+  const cover = wb.addWorksheet('合計請求書');
+  cover.columns = [{width:1},{width:7.5},{width:10.7},{width:12.3},{width:9.1},{width:8.1},{width:8},{width:10},{width:10.1}];
+
+  sc(cover,'H1','請 求 書',{size:14,bold:true,halign:'right'});
+  sc(cover,'C5',`  ${settings.clientName||'得意先名'}　様`,{size:12});
+  sc(cover,'H5',`登録番号: ${settings.companyInvoiceNo||''}`,{size:9});
+  sc(cover,'H6',settings.companyName||'',{size:9,bold:true});
+  sc(cover,'H7',settings.companyAddr||'',{size:9});
+  sc(cover,'H8',`TEL: ${settings.companyTel||''}`,{size:9});
+  sc(cover,'H9','【お振込先】',{size:9,bold:true});
+
+  cover.mergeCells('D10:E10');
+  sc(cover,'C10','日付：',{size:10,halign:'right'});
+  sc(cover,'D10',`${month.replace('-','年')}月〆日`,{size:10,halign:'center'});
+  sc(cover,'H10',settings.bankInfo1||'',{size:9});
+
+  cover.mergeCells('D11:E11');
+  sc(cover,'C11','御請求額',{size:9,halign:'center'});
+  sc(cover,'D11','=G16',{size:12,halign:'center'});
+  if(settings.bankInfo2) sc(cover,'H11',settings.bankInfo2,{size:9});
+
+  cover.mergeCells('C13:F13'); cover.mergeCells('G13:H13'); cover.mergeCells('I13:J13');
+  sc(cover,'C13','摘　　　　要',{bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
+  sc(cover,'G13','金　　　額',{bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
+  sc(cover,'I13','備　　考',{bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
+
+  const grandSubtotal = dateData.reduce((s,d)=>s+d.allSlips.reduce((s2,slip)=>s2+(slip.rows||[]).reduce((s3,row)=>s3+(row.amount||0),0),0),0);
+  const totalSlipCount = dateData.reduce((s,d)=>s+d.allSlips.length,0);
+
+  cover.mergeCells('C14:F14');
+  sc(cover,'C14',`別紙請求書　　${totalSlipCount} 枚`,{size:11,halign:'center',bdr:true});
+  cover.mergeCells('G14:H14');
+  sc(cover,'G14',grandSubtotal,{size:11,halign:'right',fmt:YEN,bdr:true});
+
+  cover.mergeCells('C15:F15');
+  sc(cover,'C15','当月分消費税　　10 ％',{size:11,halign:'center',bdr:true});
+  cover.mergeCells('G15:H15');
+  sc(cover,'G15','=INT(G14*0.1)',{size:11,halign:'right',fmt:YEN,bdr:true});
+
+  cover.mergeCells('C16:F16');
+  sc(cover,'C16','当　月　分　計',{size:11,halign:'center',bdr:true});
+  cover.mergeCells('G16:H16');
+  sc(cover,'G16','=G14+G15',{size:11,halign:'right',fmt:YEN,bdr:true});
+
+  // ===== 日付ごとの請求明細シート =====
+  const usedSheetNames = new Set();
+  dateData.forEach(({dateStr, allSlips})=>{
     let sheetName = dateStr.slice(5).replace('-','');
     let suffix = 2;
     while(usedSheetNames.has(sheetName)){ sheetName = dateStr.slice(5).replace('-','')+'_'+suffix; suffix++; }
     usedSheetNames.add(sheetName);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    const ws = wb.addWorksheet(sheetName);
+    ws.columns = [{width:3},{width:12},{width:30},{width:8},{width:6},{width:12},{width:14},{width:3}];
+
+    const dateDisp = dateStr.replace(/-/g,'/');
+    ws.mergeCells('B1:G1');
+    sc(ws,'B1',`請求明細　${dateDisp}`,{size:16,bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
+    ws.getRow(1).height = 36;
+
+    const headers = [['B','伝票No.','center'],['C','品　　名','left'],['D','数量','center'],['E','単位','center'],['F','単　価','right'],['G','金　　額','right']];
+    headers.forEach(([col,label,ha])=>{ sc(ws,col+'3',label,{bold:true,fg:WHITE,bg:DBLUE,halign:ha,bdr:true}); });
+    ws.getRow(3).height = 20;
+
+    let r = 4;
+    const itemsFirst = r;
+    allSlips.forEach(s=>{
+      ws.mergeCells(`B${r}:G${r}`);
+      sc(ws,`B${r}`,`【${s.slipNo}】 ${s.groupName}`,{bold:true,bg:LBLUE,bdr:true});
+      ws.getRow(r).height = 18;
+      r++;
+
+      (s.rows||[]).forEach((row,idx)=>{
+        const bg = idx%2===0 ? WHITE : STRIPE;
+        sc(ws,`B${r}`,s.slipNo,{size:9,bg,halign:'center',bdr:true});
+        sc(ws,`C${r}`,row.color,{size:9,bg,bdr:true});
+        sc(ws,`D${r}`,row.qty,{size:9,bg,halign:'center',bdr:true,fmt:NUM});
+        sc(ws,`E${r}`,'枚',{size:9,bg,halign:'center',bdr:true});
+        sc(ws,`F${r}`,row.price||0,{size:9,bg,halign:'right',bdr:true,fmt:YEN});
+        sc(ws,`G${r}`,{formula:`D${r}*F${r}`},{size:9,bg,halign:'right',bdr:true,fmt:YEN});
+        ws.getRow(r).height = 16;
+        r++;
+      });
+    });
+
+    const itemsLast = r-1;
+    ws.mergeCells(`B${r}:F${r}`);
+    sc(ws,`B${r}`,'合　計（税抜）',{bold:true,size:11,fg:WHITE,bg:NAVY,halign:'right',bdr:true});
+    sc(ws,`G${r}`,itemsLast>=itemsFirst?{formula:`SUM(G${itemsFirst}:G${itemsLast})`}:0,{bold:true,size:12,fg:WHITE,bg:NAVY,halign:'right',bdr:true,fmt:YEN});
+    ws.getRow(r).height = 28;
   });
 
-  const tax = Math.floor(grandSubtotal*TAX_RATE);
-  const total = grandSubtotal+tax;
-  const monthDisp = month.replace('-','年')+'月';
-
-  // 表紙（合計請求書）
-  const cover = [];
-  const row = i => { while(cover.length<=i) cover.push([]); return cover[i]; };
-  row(0)[6] = '請求書';
-  row(2)[2] = `${settings.clientName||'得意先名'}　様`;
-  row(2)[7] = `登録番号: ${settings.companyInvoiceNo||''}`;
-  row(3)[7] = settings.companyName||'';
-  row(4)[7] = settings.companyAddr||'';
-  row(5)[7] = `TEL: ${settings.companyTel||''}`;
-  row(6)[7] = '【お振込先】';
-  row(7)[2] = `日付：${monthDisp}〆日`;
-  row(7)[7] = settings.bankInfo1||'';
-  row(8)[2] = `御請求額　${total}`;
-  if(settings.bankInfo2) row(8)[7] = settings.bankInfo2;
-  row(10)[2] = '摘要'; row(10)[6] = '金額'; row(10)[8] = '備考';
-  row(11)[2] = `別紙請求書　${totalSlipCount}枚`; row(11)[6] = grandSubtotal;
-  row(12)[2] = '当月分消費税　10％'; row(12)[6] = tax;
-  row(13)[2] = '当月分計'; row(13)[6] = total;
-
-  const coverWs = XLSX.utils.aoa_to_sheet(cover);
-  coverWs['!cols'] = [{wch:4},{wch:4},{wch:20},{wch:8},{wch:8},{wch:8},{wch:12},{wch:8},{wch:16}];
-  const newBook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(newBook, coverWs, '合計請求書');
-  wb.SheetNames.forEach(name=>{ XLSX.utils.book_append_sheet(newBook, wb.Sheets[name], name); });
-
-  XLSX.writeFile(newBook, `${target}月分請求明細一覧.xlsx`);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${target}月分請求明細一覧.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
   toast('Excelファイルを出力しました');
+
+  }catch(e){ toast('Excel出力エラー: '+e.message); }
+  finally{ showLoading(false); }
 }
 
 function printInvoice(){
