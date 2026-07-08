@@ -288,6 +288,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <label style="font-size:12px;font-weight:normal;margin-left:8px;display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
         <input type="checkbox" id="baraPrintTargetCheckbox" checked onchange="toggleBaraPrintTarget(this.checked)">🖨 印刷対象
       </label>
+      <button class="btn-danger btn-sm" style="float:right;" onclick="clearAllBara()">✕ 全削除</button>
     </div>
     <div class="baraBody" id="baraBody"></div>
   </div>
@@ -1467,6 +1468,14 @@ function removeBaraRowByItemId(itemId){
   }
   saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
 }
+function clearAllBara(){
+  const hasContent = st.bara.some(r=>r.itemId&&r.qty);
+  if(!hasContent){ toast('バラは空です'); return; }
+  if(!confirm('バラの内容をすべて削除します。よろしいですか？')) return;
+  st.bara = [{itemId:'',qty:''}];
+  saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
+  toast('バラを削除しました');
+}
 
 function onBaraChange(idx,field,val){
   st.bara[idx][field] = field==='qty'?(parseInt(val)||''):val;
@@ -1695,19 +1704,22 @@ async function openPrintDelivery(){
   // ②残数超過チェック（警告のみ・ブロックなし）
   // 残数0=完了済み納品は正常なのでブロックしない
 
-  // ③箱数チェック不一致チェック（ブロック）※バラは対象外
+  // ③箱数チェック不一致チェック（ブロック）※バラ・印刷対象外パレットは対象外
   const unchecked = [], nomatch = [];
-  st.pallets.forEach(p=>p.rows.forEach(r=>{
-    if(!r.itemId||!r.qty) return;
-    const item = st.itemMaster.find(m=>m.id==r.itemId);
-    if(!item||!item.caseQty||item.caseQty<=0) return;
-    const expectedCases = Math.floor((parseInt(r.qty)||0)/item.caseQty);
-    if(expectedCases===0) return; // 端数のみ（1箱未満）はチェック不要
-    const checkVal = _checkVals[r.itemId]||0;
-    const label = `${item.name}${item.color?' ('+item.color+')':''}`;
-    if(checkVal===0) unchecked.push(label+`: ${expectedCases}箱`);
-    else if(checkVal!==expectedCases) nomatch.push(label+`: チェック${checkVal}箱 ≠ 登録${expectedCases}箱`);
-  }));
+  st.pallets.forEach(p=>{
+    if(p.printTarget===false) return; // 印刷対象外のパレットはチェック不要
+    p.rows.forEach(r=>{
+      if(!r.itemId||!r.qty) return;
+      const item = st.itemMaster.find(m=>m.id==r.itemId);
+      if(!item||!item.caseQty||item.caseQty<=0) return;
+      const expectedCases = Math.floor((parseInt(r.qty)||0)/item.caseQty);
+      if(expectedCases===0) return; // 端数のみ（1箱未満）はチェック不要
+      const checkVal = _checkVals[r.itemId]||0;
+      const label = `${item.name}${item.color?' ('+item.color+')':''}`;
+      if(checkVal===0) unchecked.push(label+`: ${expectedCases}箱`);
+      else if(checkVal!==expectedCases) nomatch.push(label+`: チェック${checkVal}箱 ≠ 登録${expectedCases}箱`);
+    });
+  });
   // バラは箱数チェック不要（端数・補修分のため）
   if(unchecked.length>0||nomatch.length>0){
     let msg2 = '箱数チェックが完了していません。\n\n';
