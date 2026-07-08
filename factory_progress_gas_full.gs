@@ -25,6 +25,7 @@ function doPost(e) {
     if (action === 'saveOperationLog')    return saveOperationLog_(p);
     if (action === 'saveAll')             return saveAll_(p);
     if (action === 'saveShipping')        return saveShipping_(p);
+    if (action === 'updateShipping')      return updateShipping_(p);
     if (action === 'saveShippingWork')    return saveShippingWork_(p);
     if (action === 'deleteShipping')      return deleteShipping_(p);
     if (action === 'getSlipNo')           return getSlipNo_(p);
@@ -682,6 +683,64 @@ function saveShipping_(p) {
     return ContentService
       .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
       .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// 出荷履歴の既存レコードをid指定で上書き更新する（③タブでの編集の保存用。見つからなければ新規追加にフォールバック）
+function updateShipping_(p) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (e) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: false, error: 'サーバー混雑中です。少し待って再試行してください' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('deliveryHistory');
+    if (!sheet) {
+      sheet = ss.insertSheet('deliveryHistory');
+      sheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate','type']);
+    }
+
+    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (headers.indexOf('type') === -1) {
+      sheet.getRange(1, headers.length + 1).setValue('type');
+      headers = headers.concat(['type']);
+    }
+
+    const r = p.record;
+    if (!r || !r.id) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: false, error: 'record.id is required' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const idColIdx = headers.indexOf('id');
+    const data = sheet.getDataRange().getValues();
+    let targetRow = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][idColIdx] === r.id) { targetRow = i + 1; break; }
+    }
+
+    const rowValues = headers.map(function (h) { return (r[h] !== undefined && r[h] !== null) ? r[h] : ''; });
+    if (targetRow > 0) {
+      sheet.getRange(targetRow, 1, 1, headers.length).setValues([rowValues]);
+    } else {
+      // 万一見つからなければ、データを失わないよう新規行として追加
+      sheet.appendRow(rowValues);
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true, updated: targetRow > 0 }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
   }
 }
 
