@@ -90,7 +90,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .editSlipBlock{border:1px solid #ddd;border-radius:6px;margin-bottom:10px;overflow:hidden;}
 .editSlipHead{background:#e8f0fe;padding:8px 12px;font-weight:bold;font-size:13px;display:flex;align-items:center;gap:8px;}
 .editSlipBody{padding:10px;}
-.editRow{display:grid;grid-template-columns:1fr 80px 32px;gap:6px;align-items:center;margin-bottom:6px;}
+.editRow{display:grid;grid-template-columns:1fr 60px 70px 32px;gap:6px;align-items:center;margin-bottom:6px;}
 
 /* ===== 材料在庫 設定モーダル ===== */
 #msSettingsModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9992;display:none;align-items:center;justify-content:center;}
@@ -2102,17 +2102,23 @@ function openEditModal(id){
   // 編集UIを生成（slipsを編集可能な形で表示）
   const el=document.getElementById('editModalBody');
   el.innerHTML=`
-    <div style="margin-bottom:10px;font-size:12px;color:#666;">出荷日・メモはパレット画面の入力欄で変更できます</div>
+    <div style="margin-bottom:10px;font-size:12px;color:#666;">出荷日・メモはパレット画面の入力欄で変更できます。単価は品目マスタの現在価格に関係なく、ここで自由に修正できます（過去の価格改定前の伝票の訂正などに利用してください）。</div>
     ${(record.slips||[]).map((s,si)=>`
       <div class="editSlipBlock">
         <div class="editSlipHead">伝票 ${esc(s.slipNo)}　${esc(s.groupName)}</div>
         <div class="editSlipBody">
+          <div class="editRow" style="font-size:11px;color:#999;">
+            <div>品目名(カラー)</div><div style="text-align:center;">数量</div><div style="text-align:center;">単価</div><div></div>
+          </div>
           ${s.rows.map((r,ri)=>`
             <div class="editRow">
               <div style="font-size:12px;">${esc(r.name)} (${esc(r.color)})</div>
               <input type="number" min="0" value="${r.qty}"
                 onchange="updateEditQty(${si},${ri},this.value)"
                 oninput="updateEditQty(${si},${ri},this.value)">
+              <input type="number" min="0" value="${r.price}"
+                onchange="updateEditPrice(${si},${ri},this.value)"
+                oninput="updateEditPrice(${si},${ri},this.value)">
               <div></div>
             </div>
           `).join('')}
@@ -2128,6 +2134,18 @@ function updateEditQty(slipIdx,rowIdx,val){
   if(!record||!record.slips[slipIdx]) return;
   const row=record.slips[slipIdx].rows[rowIdx];
   row.qty=parseInt(val)||0;
+  row.amount=row.price*row.qty;
+  const s=record.slips[slipIdx];
+  s.subtotal=s.rows.reduce((sum,r)=>sum+r.amount,0);
+  s.tax=Math.floor(s.subtotal*TAX_RATE);
+  s.total=s.subtotal+s.tax;
+}
+
+function updateEditPrice(slipIdx,rowIdx,val){
+  const record=st.deliveryHistory.find(r=>r.id===_editingRecordId);
+  if(!record||!record.slips[slipIdx]) return;
+  const row=record.slips[slipIdx].rows[rowIdx];
+  row.price=parseInt(val)||0;
   row.amount=row.price*row.qty;
   const s=record.slips[slipIdx];
   s.subtotal=s.rows.reduce((sum,r)=>sum+r.amount,0);
