@@ -284,7 +284,11 @@ tr:nth-child(even) td{background:#f9f9f9;}
 
   <!-- バラ出荷 -->
   <div class="baraBlock">
-    <div class="baraHeader">🚗 バラ（助手席/その他）</div>
+    <div class="baraHeader">🚗 バラ（助手席/その他）
+      <label style="font-size:12px;font-weight:normal;margin-left:8px;display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
+        <input type="checkbox" id="baraPrintTargetCheckbox" checked onchange="toggleBaraPrintTarget(this.checked)">🖨 印刷対象
+      </label>
+    </div>
     <div class="baraBody" id="baraBody"></div>
   </div>
 
@@ -521,6 +525,7 @@ let st = {
   bara: [],
   deliveryHistory: [],
   materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [] },
+  baraPrintTarget: true,
   lastSyncedWorkAt: ''
   // deliveryHistory の各レコード:
   // { id, timestamp, deviceName, shippingDate, memo,
@@ -603,7 +608,8 @@ function saveLocalState(){
     bara: st.bara,
     deliveryHistory: st.deliveryHistory,
     materialStock: st.materialStock,
-    lastSyncedWorkAt: st.lastSyncedWorkAt
+    lastSyncedWorkAt: st.lastSyncedWorkAt,
+    baraPrintTarget: st.baraPrintTarget
   }));
 }
 function loadLocalState(){
@@ -618,6 +624,7 @@ function loadLocalState(){
     st.deliveryHistory = d.deliveryHistory || [];
     st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[]};
     st.lastSyncedWorkAt = d.lastSyncedWorkAt || '';
+    st.baraPrintTarget = d.baraPrintTarget !== false;
   }
   if(st.pallets.length === 0) st.pallets.push(newPallet());
   if(st.bara.length === 0)    st.bara.push({itemId:'',qty:''});
@@ -1417,17 +1424,29 @@ function renderPallets(){
     return `
     <div class="palletBlock">
       <div class="palletHeader">📦 パレット ${pi+1}
+        <label style="font-size:12px;font-weight:normal;margin-left:8px;display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
+          <input type="checkbox" ${p.printTarget!==false?'checked':''} onchange="togglePalletPrintTarget(${pi},this.checked)">🖨 印刷対象
+        </label>
         <button class="btn-danger btn-sm" onclick="removePallet(${pi})">✕ 削除</button>
       </div>
       <div class="palletBody">
         ${rowsHTML}
         ${totalCases>0?`<div class="pallet-total">合計箱数: ${totalCases}箱</div>`:''}
-      </div>
+      </div>${p.printTarget===false?'<div style="background:#fff3cd;color:#856404;font-size:11px;padding:4px 8px;">⚠ このパレットは印刷対象から除外されています（積み増し中など）</div>':''}
     </div>`;
   }).join('');
 }
 
 // ===== バラ管理 =====
+function togglePalletPrintTarget(pi,checked){
+  if(!st.pallets[pi]) return;
+  st.pallets[pi].printTarget = checked;
+  saveLocalState(); renderPallets(); debounceWorkSave();
+}
+function toggleBaraPrintTarget(checked){
+  st.baraPrintTarget = checked;
+  saveLocalState(); debounceWorkSave();
+}
 function addBaraRow(){
   st.bara.push({itemId:'',qty:''});
   saveLocalState(); renderBara(); saveShippingWork();
@@ -1460,6 +1479,8 @@ function onBaraMemoByItemId(itemId, val){
 }
 function renderBara(){
   const el = document.getElementById('baraBody');
+  const cb = document.getElementById('baraPrintTargetCheckbox');
+  if(cb) cb.checked = st.baraPrintTarget!==false;
   const validBara = st.bara.filter(r=>r.itemId && r.qty);
   if(validBara.length === 0){
     el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">品目タイルから「バラに追加」してください</p>';
@@ -1487,6 +1508,7 @@ function renderBara(){
 function collectAllRows(){
   const rows = [];
   st.pallets.forEach((p,pi)=>{
+    if(p.printTarget===false) return; // 印刷対象から除外されたパレットはスキップ
     p.rows.forEach(r=>{
       if(r.itemId&&r.qty){
         const item = st.itemMaster.find(m=>m.id==r.itemId);
@@ -1494,12 +1516,14 @@ function collectAllRows(){
       }
     });
   });
-  st.bara.forEach(r=>{
-    if(r.itemId&&r.qty){
-      const item = st.itemMaster.find(m=>m.id==r.itemId);
-      if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||''});
-    }
-  });
+  if(st.baraPrintTarget!==false){
+    st.bara.forEach(r=>{
+      if(r.itemId&&r.qty){
+        const item = st.itemMaster.find(m=>m.id==r.itemId);
+        if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||''});
+      }
+    });
+  }
   return rows;
 }
 function groupRowsByGroup(allRows){
