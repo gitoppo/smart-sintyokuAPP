@@ -483,6 +483,9 @@ tr:nth-child(even) td{background:#f9f9f9;}
   <div class="card">
     <div class="cardTitle">得意先情報</div>
     <div class="settingRow"><label>得意先名</label><input type="text" id="clientName" placeholder="株式会社△△"></div>
+    <div class="settingRow"><label>得意先郵便番号</label><input type="text" id="clientZip" placeholder="571-0008"></div>
+    <div class="settingRow"><label>得意先住所</label><input type="text" id="clientAddr" placeholder="大阪府〇〇市..."></div>
+    <div style="font-size:11px;color:#999;margin-top:2px;">※郵便番号・住所は請求書（Excel出力）にのみ使用します。納品書には印字されません。</div>
   </div>
   <div class="card">
     <div class="cardTitle">端末・接続</div>
@@ -573,7 +576,7 @@ let st = {
 let settings = {
   companyName:'', companyAddr:'', companyTel:'',
   companyInvoiceNo:'', bankInfo1:'', bankInfo2:'',
-  clientName:'',
+  clientName:'', clientZip:'', clientAddr:'',
   deviceName:'', gasUrl:''
 };
 
@@ -624,6 +627,8 @@ function loadSettings(){
   document.getElementById('bankInfo1').value   = settings.bankInfo1||'';
   document.getElementById('bankInfo2').value   = settings.bankInfo2||'';
   document.getElementById('clientName').value  = settings.clientName||'';
+  document.getElementById('clientZip').value   = settings.clientZip||'';
+  document.getElementById('clientAddr').value  = settings.clientAddr||'';
   document.getElementById('deviceName').value  = settings.deviceName||'';
   document.getElementById('gasUrl').value      = settings.gasUrl||'';
 }
@@ -635,6 +640,8 @@ function saveSettings(){
   settings.bankInfo1   = document.getElementById('bankInfo1').value.trim();
   settings.bankInfo2   = document.getElementById('bankInfo2').value.trim();
   settings.clientName  = document.getElementById('clientName').value.trim();
+  settings.clientZip   = document.getElementById('clientZip').value.trim();
+  settings.clientAddr  = document.getElementById('clientAddr').value.trim();
   settings.deviceName  = document.getElementById('deviceName').value.trim();
   settings.gasUrl      = document.getElementById('gasUrl').value.trim();
   localStorage.setItem('shippingSettings', JSON.stringify(settings));
@@ -2458,7 +2465,24 @@ async function exportInvoiceExcel(){
   const cover = wb.addWorksheet('合計請求書');
   cover.columns = [{width:1},{width:7.5},{width:10.7},{width:12.3},{width:9.1},{width:8.1},{width:8},{width:10},{width:10.1}];
 
+  // 結合範囲の全セルに罫線を適用（結合先頭セルだけだと右端・下端の線が抜けるため）
+  const colLetters = ['A','B','C','D','E','F','G','H','I','J','K'];
+  const borderRange = (ws, range) => {
+    const [start,end] = range.split(':');
+    const sc0 = start.match(/[A-Z]+/)[0], sr0 = parseInt(start.match(/\d+/)[0]);
+    const ec0 = end.match(/[A-Z]+/)[0], er0 = parseInt(end.match(/\d+/)[0]);
+    const ci0 = colLetters.indexOf(sc0), ci1 = colLetters.indexOf(ec0);
+    for(let r=sr0; r<=er0; r++){
+      for(let c=ci0; c<=ci1; c++){
+        ws.getCell(`${colLetters[c]}${r}`).border = {top:THIN,left:THIN,bottom:THIN,right:THIN};
+      }
+    }
+  };
+
   sc(cover,'H1','請 求 書',{size:14,bold:true,halign:'right'});
+  cover.mergeCells('C2:D2');
+  sc(cover,'C2',`  〒${settings.clientZip||''}`,{size:10});
+  sc(cover,'C3',`  ${settings.clientAddr||''}`,{size:11});
   sc(cover,'C5',`  ${settings.clientName||'得意先名'}　様`,{size:12});
   sc(cover,'H5',`登録番号: ${settings.companyInvoiceNo||''}`,{size:9});
   sc(cover,'H6',settings.companyName||'',{size:9,bold:true});
@@ -2477,27 +2501,35 @@ async function exportInvoiceExcel(){
   if(settings.bankInfo2) sc(cover,'H11',settings.bankInfo2,{size:9});
 
   cover.mergeCells('C13:F13'); cover.mergeCells('G13:H13'); cover.mergeCells('I13:J13');
-  sc(cover,'C13','摘　　　　要',{bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
-  sc(cover,'G13','金　　　額',{bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
-  sc(cover,'I13','備　　考',{bold:true,fg:WHITE,bg:NAVY,halign:'center',bdr:true});
+  sc(cover,'C13','摘　　　　要',{bold:true,fg:WHITE,bg:NAVY,halign:'center'});
+  sc(cover,'G13','金　　　額',{bold:true,fg:WHITE,bg:NAVY,halign:'center'});
+  sc(cover,'I13','備　　考',{bold:true,fg:WHITE,bg:NAVY,halign:'center'});
+  borderRange(cover,'C13:F13'); borderRange(cover,'G13:H13'); borderRange(cover,'I13:J13');
 
   const grandSubtotal = dateData.reduce((s,d)=>s+d.allSlips.reduce((s2,slip)=>s2+(slip.rows||[]).reduce((s3,row)=>s3+(row.amount||0),0),0),0);
   const totalSlipCount = dateData.reduce((s,d)=>s+d.allSlips.length,0);
 
   cover.mergeCells('C14:F14');
-  sc(cover,'C14',`別紙請求書　　${totalSlipCount} 枚`,{size:11,halign:'center',bdr:true});
+  sc(cover,'C14',`別紙請求書　　${totalSlipCount} 枚`,{size:11,halign:'center'});
   cover.mergeCells('G14:H14');
-  sc(cover,'G14',grandSubtotal,{size:11,halign:'right',fmt:YEN,bdr:true});
+  sc(cover,'G14',grandSubtotal,{size:11,halign:'right',fmt:YEN});
+  borderRange(cover,'C14:F14'); borderRange(cover,'G14:H14');
 
   cover.mergeCells('C15:F15');
-  sc(cover,'C15','当月分消費税　　10 ％',{size:11,halign:'center',bdr:true});
+  sc(cover,'C15','当月分消費税　　10 ％',{size:11,halign:'center'});
   cover.mergeCells('G15:H15');
-  sc(cover,'G15',{formula:'INT(G14*0.1)'},{size:11,halign:'right',fmt:YEN,bdr:true});
+  sc(cover,'G15',{formula:'INT(G14*0.1)'},{size:11,halign:'right',fmt:YEN});
+  borderRange(cover,'C15:F15'); borderRange(cover,'G15:H15');
 
   cover.mergeCells('C16:F16');
-  sc(cover,'C16','当　月　分　計',{size:11,halign:'center',bdr:true});
+  sc(cover,'C16','当　月　分　計',{size:11,halign:'center'});
   cover.mergeCells('G16:H16');
-  sc(cover,'G16',{formula:'G14+G15'},{size:11,halign:'right',fmt:YEN,bdr:true});
+  sc(cover,'G16',{formula:'G14+G15'},{size:11,halign:'right',fmt:YEN});
+  borderRange(cover,'C16:F16'); borderRange(cover,'G16:H16');
+
+  // 備考欄（空欄の枠だけ、3行分まとめて1つの箱にする）
+  cover.mergeCells('I14:J16');
+  borderRange(cover,'I14:J16');
 
   // ===== 日付ごとの請求明細シート =====
   const usedSheetNames = new Set();
