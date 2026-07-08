@@ -92,6 +92,13 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .editSlipBody{padding:10px;}
 .editRow{display:grid;grid-template-columns:1fr 55px 50px 65px 28px;gap:4px;align-items:center;margin-bottom:6px;}
 
+/* ===== 手入力納品書モーダル ===== */
+#manualSlipModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9993;display:none;align-items:center;justify-content:center;}
+#manualSlipModal.open{display:flex;}
+#manualSlipModalInner{background:#fff;border-radius:8px;padding:20px;width:90%;max-width:520px;max-height:85vh;overflow-y:auto;}
+.manualSlipRow{display:grid;grid-template-columns:1fr 55px 70px 1fr 28px;gap:6px;align-items:center;margin-bottom:6px;}
+.manualSlipRow input{font-size:13px;padding:5px 6px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box;}
+
 /* ===== 材料在庫 設定モーダル ===== */
 #msSettingsModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9992;display:none;align-items:center;justify-content:center;}
 #msSettingsModal.open{display:flex;}
@@ -170,7 +177,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 @media print{
   @page{margin:10mm 6mm;size:A4 portrait;}
   body{background:#fff;font-size:10.5pt;}
-  #tabBar,#toast,#loading,#editModal,#cmModal,#msSettingsModal,#bs,#bs-overlay,.no-print{display:none!important;}
+  #tabBar,#toast,#loading,#editModal,#cmModal,#msSettingsModal,#manualSlipModal,#bs,#bs-overlay,.no-print{display:none!important;}
   .tabContent{display:none!important;}
   #printArea{display:block!important;}
 
@@ -298,6 +305,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <button class="btn-success" style="padding:10px 16px;font-size:15px;" onclick="openPrintDelivery()">🖨 納品書印刷</button>
     <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openPrintChecklist()">📋 チェックリスト印刷</button>
     <button class="btn-warn" style="padding:10px 16px;font-size:15px;" onclick="openChecklistMatrix()">🧮 チェックリスト入力</button>
+    <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openManualSlipModal()">✏️ 手入力で納品書作成</button>
   </div>
 </div>
 
@@ -410,6 +418,27 @@ tr:nth-child(even) td{background:#f9f9f9;}
   <div class="card">
     <div class="cardTitle">入荷・返品 履歴</div>
     <div id="materialMovementList"></div>
+  </div>
+</div>
+
+<!-- 手入力納品書モーダル -->
+<div id="manualSlipModal">
+  <div id="manualSlipModalInner">
+    <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">✏️ 手入力で納品書作成</div>
+    <div style="font-size:12px;color:#666;margin-bottom:10px;">
+      品目マスタに登録するほどでもないイレギュラー品（試作品・見本帳用シートなど）の納品書を、手入力で発行します。<br>
+      通常の納品書と同じく伝票番号が自動採番され、出荷履歴・請求書にも反映されます。
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;color:#666;">品名</label>
+      <input type="text" id="manualSlipGroupName" placeholder="例: 試作品シート" style="width:100%;">
+    </div>
+    <div id="manualSlipRows"></div>
+    <button class="btn-gray btn-sm" onclick="addManualSlipRow()" style="margin-bottom:10px;">＋ 行追加</button>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="btn-success" onclick="submitManualSlip()">🖨 発行</button>
+      <button class="btn-gray" onclick="closeManualSlipModal()">キャンセル</button>
+    </div>
   </div>
 </div>
 
@@ -1759,6 +1788,75 @@ async function openPrintDelivery(){
   msg += '\n\n発行すると履歴に保存されます。';
   if(!confirm(msg)) return;
 
+  printDelivery(grouped, null, startNo);
+}
+
+// ===== 手入力納品書（品目マスタ未登録のイレギュラー品用） =====
+let _manualSlipRowCount = 0;
+
+function openManualSlipModal(){
+  document.getElementById('manualSlipGroupName').value = '';
+  document.getElementById('manualSlipRows').innerHTML = '';
+  _manualSlipRowCount = 0;
+  addManualSlipRow();
+  document.getElementById('manualSlipModal').classList.add('open');
+}
+function closeManualSlipModal(){
+  document.getElementById('manualSlipModal').classList.remove('open');
+}
+function addManualSlipRow(){
+  const idx = _manualSlipRowCount++;
+  const el = document.getElementById('manualSlipRows');
+  const header = idx===0 ? `<div class="manualSlipRow" style="font-size:11px;color:#999;margin-bottom:2px;">
+      <div>カラー</div><div style="text-align:center;">数量</div><div style="text-align:center;">単価</div><div>備考</div><div></div>
+    </div>` : '';
+  el.insertAdjacentHTML('beforeend', `${header}
+    <div class="manualSlipRow" id="manualSlipRow-${idx}">
+      <input type="text" placeholder="カラー" id="manualSlipColor-${idx}">
+      <input type="number" min="0" placeholder="数量" id="manualSlipQty-${idx}">
+      <input type="number" min="0" placeholder="単価" id="manualSlipPrice-${idx}">
+      <input type="text" placeholder="備考" id="manualSlipMemo-${idx}">
+      <button class="btn-danger btn-sm" onclick="document.getElementById('manualSlipRow-${idx}').remove()">✕</button>
+    </div>`);
+}
+
+async function submitManualSlip(){
+  const groupName = document.getElementById('manualSlipGroupName').value.trim();
+  if(!groupName){ toast('品名を入力してください'); return; }
+
+  const rows = [];
+  for(let i=0; i<_manualSlipRowCount; i++){
+    const rowEl = document.getElementById('manualSlipRow-'+i);
+    if(!rowEl) continue; // 削除済み行はスキップ
+    const color = document.getElementById('manualSlipColor-'+i).value.trim();
+    const qty = parseInt(document.getElementById('manualSlipQty-'+i).value)||0;
+    const price = parseInt(document.getElementById('manualSlipPrice-'+i).value)||0;
+    const memo = document.getElementById('manualSlipMemo-'+i).value.trim();
+    if(qty<=0) continue; // 数量未入力の行は無視
+    rows.push({
+      item:{id:'manual_'+Date.now()+'_'+i, name:groupName, color, price},
+      qty, memo
+    });
+  }
+  if(rows.length===0){ toast('数量を入力した行が1つもありません'); return; }
+
+  const grouped = [{groupName, rows}];
+  const date = document.getElementById('shippingDate').value||today();
+
+  showLoading(true);
+  let startNo=1;
+  try{
+    if(settings.gasUrl){
+      const res = await gasPost({action:'getSlipNo', date, count:1});
+      if(res && res.ok) startNo = res.startNo;
+    }
+  }catch(e){ console.warn('採番エラー:', e); }
+  finally{ showLoading(false); }
+
+  const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName).join('\n');
+  if(!confirm(`以下の納品書を発行しますか？\n\n出荷日: ${date}\n\n${slipList}\n\n発行すると履歴に保存されます。`)) return;
+
+  closeManualSlipModal();
   printDelivery(grouped, null, startNo);
 }
 
