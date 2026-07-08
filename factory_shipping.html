@@ -374,6 +374,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <button class="btn-gray btn-sm" onclick="openMaterialStockSettings()">⚙️ 対象グループ・起点在庫の設定</button>
       <button class="btn-success no-print" onclick="printMaterialStock()">🖨 在庫表を印刷</button>
+      <button class="btn-warn btn-sm no-print" onclick="confirmMaterialStockBaseline()">📌 現在庫を新しい起点として確定</button>
     </div>
     <div id="materialStockTable"></div>
   </div>
@@ -2493,6 +2494,45 @@ async function saveMaterialStockSettingsFromModal(){
   } else {
     toast('設定を保存しました（ローカルのみ）');
   }
+}
+
+// 現在の計算上の在庫を新しい起点として確定し、それ以前の入荷・返品はアーカイブへ退避する
+async function confirmMaterialStockBaseline(){
+  const curSettings = st.materialStock.settings || {};
+  const enabled = curSettings.enabledGroups || [];
+  if(enabled.length===0){ toast('先に対象グループを設定してください'); return; }
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+
+  const todayStr = today();
+  if(!confirm(`現在の計算結果（${todayStr}時点）を新しい起点在庫として確定します。\n起点日より前の入荷・返品記録は削除ではなく、アーカイブシートへ退避されます（あとから見返せます）。\n\n実行しますか？`)) return;
+
+  const rows = computeMaterialStock();
+  const newBaseline = {};
+  rows.forEach(r=>{ newBaseline[r.group] = r.qty; });
+  const newSettings = {
+    enabledGroups: curSettings.enabledGroups||[],
+    baseline: newBaseline,
+    baselineDate: todayStr,
+    repairKeywords: curSettings.repairKeywords||[]
+  };
+
+  showLoading(true);
+  try{
+    const res1 = await gasPost({action:'saveMaterialStockSettings', settings:newSettings});
+    if(!res1 || !res1.ok){ toast('起点の保存に失敗しました: '+(res1?res1.error:'不明なエラー')); return; }
+    st.materialStock.settings = newSettings;
+
+    const res2 = await gasPost({action:'archiveMaterialMovements', cutoffDate: todayStr});
+    if(res2 && res2.ok){
+      st.materialStock.movements = st.materialStock.movements.filter(m=>!(m.date && m.date<=todayStr));
+      toast(`起点を更新しました（入荷・返品${res2.archivedCount||0}件をアーカイブ）`);
+    } else {
+      toast('起点は更新されましたが、アーカイブ処理でエラーが出ました: '+(res2?res2.error:'不明なエラー'));
+    }
+    saveLocalState();
+    renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
+  }catch(e){ toast('通信エラー: '+e.message); }
+  finally{ showLoading(false); }
 }
 
 function printMaterialStock(){
