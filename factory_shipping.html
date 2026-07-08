@@ -254,6 +254,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 }
 @media screen{#printArea{display:none;}}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -368,6 +369,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
       </div>
       <button class="btn-primary" onclick="calcInvoice()">📊 集計</button>
       <button class="btn-success no-print" onclick="printInvoice()">🖨 印刷</button>
+      <button class="btn-gray no-print" onclick="exportInvoiceExcel()">📥 Excel出力（明細付き）</button>
     </div>
     <div id="invoiceResult"></div>
   </div>
@@ -474,6 +476,9 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div class="settingRow"><label>会社名</label><input type="text" id="companyName" placeholder="株式会社〇〇"></div>
     <div class="settingRow"><label>住所</label><input type="text" id="companyAddr" placeholder="大阪府〇〇市..."></div>
     <div class="settingRow"><label>電話番号</label><input type="text" id="companyTel" placeholder="06-XXXX-XXXX"></div>
+    <div class="settingRow"><label>インボイス登録番号</label><input type="text" id="companyInvoiceNo" placeholder="T1234567890123"></div>
+    <div class="settingRow"><label>振込先1</label><input type="text" id="bankInfo1" placeholder="〇〇信用金庫 〇〇支店 普通1234567"></div>
+    <div class="settingRow"><label>振込先2（任意）</label><input type="text" id="bankInfo2" placeholder="（2つ目の振込先があれば）"></div>
   </div>
   <div class="card">
     <div class="cardTitle">得意先情報</div>
@@ -567,6 +572,7 @@ let st = {
 
 let settings = {
   companyName:'', companyAddr:'', companyTel:'',
+  companyInvoiceNo:'', bankInfo1:'', bankInfo2:'',
   clientName:'',
   deviceName:'', gasUrl:''
 };
@@ -614,6 +620,9 @@ function loadSettings(){
   document.getElementById('companyName').value = settings.companyName||'';
   document.getElementById('companyAddr').value = settings.companyAddr||'';
   document.getElementById('companyTel').value  = settings.companyTel||'';
+  document.getElementById('companyInvoiceNo').value = settings.companyInvoiceNo||'';
+  document.getElementById('bankInfo1').value   = settings.bankInfo1||'';
+  document.getElementById('bankInfo2').value   = settings.bankInfo2||'';
   document.getElementById('clientName').value  = settings.clientName||'';
   document.getElementById('deviceName').value  = settings.deviceName||'';
   document.getElementById('gasUrl').value      = settings.gasUrl||'';
@@ -622,6 +631,9 @@ function saveSettings(){
   settings.companyName = document.getElementById('companyName').value.trim();
   settings.companyAddr = document.getElementById('companyAddr').value.trim();
   settings.companyTel  = document.getElementById('companyTel').value.trim();
+  settings.companyInvoiceNo = document.getElementById('companyInvoiceNo').value.trim();
+  settings.bankInfo1   = document.getElementById('bankInfo1').value.trim();
+  settings.bankInfo2   = document.getElementById('bankInfo2').value.trim();
   settings.clientName  = document.getElementById('clientName').value.trim();
   settings.deviceName  = document.getElementById('deviceName').value.trim();
   settings.gasUrl      = document.getElementById('gasUrl').value.trim();
@@ -2388,6 +2400,101 @@ function calcInvoice(){
       <div style="font-size:11px;color:#666;margin-top:8px;">納品書件数: ${records.length}件　集計日: ${today()}</div>
     </div>
   `;
+}
+
+// 日付ごとの明細シート＋合計請求書の表紙を1つのExcelファイルとして出力
+function exportInvoiceExcel(){
+  if(typeof XLSX==='undefined'){ toast('Excel出力ライブラリの読み込みに失敗しました。通信環境を確認してください'); return; }
+  const month = document.getElementById('invoiceMonth').value;
+  if(!month){ toast('対象月を選択してください'); return; }
+  const target = month.slice(0,7);
+  const records = st.deliveryHistory.filter(r=>
+    r.type!=='checklist' &&
+    r.shippingDate &&
+    (r.shippingDate||'').slice(0,7)===target &&
+    r.slips && r.slips.length>0
+  );
+  if(records.length===0){ toast('該当する納品書がありません'); return; }
+
+  // 出荷日ごとにグループ化
+  const byDate = {};
+  records.forEach(rec=>{
+    const d = rec.shippingDate;
+    if(!byDate[d]) byDate[d] = [];
+    byDate[d].push(rec);
+  });
+  const dates = Object.keys(byDate).sort();
+
+  const wb = XLSX.utils.book_new();
+  let grandSubtotal = 0;
+  let totalSlipCount = 0;
+  const usedSheetNames = new Set();
+
+  dates.forEach(dateStr=>{
+    let allSlips = [];
+    byDate[dateStr].forEach(rec=>{ allSlips = allSlips.concat(rec.slips||[]); });
+    allSlips.sort((a,b)=>(a.slipNo||'').localeCompare(b.slipNo||''));
+
+    const dateDisp = dateStr.replace(/-/g,'/');
+    const aoa = [
+      [`請求明細　${dateDisp}`],
+      [],
+      ['伝票No.','品名','数量','単位','単価','金額']
+    ];
+    let dateSubtotal = 0;
+    allSlips.forEach(s=>{
+      aoa.push([`【${s.slipNo}】 ${s.groupName}`]);
+      (s.rows||[]).forEach(r=>{
+        aoa.push([s.slipNo, r.color, r.qty, '枚', r.price||0, r.amount||0]);
+        dateSubtotal += r.amount||0;
+      });
+      totalSlipCount++;
+    });
+    aoa.push(['合計（税抜）','','','','',dateSubtotal]);
+    grandSubtotal += dateSubtotal;
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:14},{wch:16},{wch:8},{wch:6},{wch:10},{wch:12}];
+
+    // シート名はMMDD（重複時は連番を付与）
+    let sheetName = dateStr.slice(5).replace('-','');
+    let suffix = 2;
+    while(usedSheetNames.has(sheetName)){ sheetName = dateStr.slice(5).replace('-','')+'_'+suffix; suffix++; }
+    usedSheetNames.add(sheetName);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  const tax = Math.floor(grandSubtotal*TAX_RATE);
+  const total = grandSubtotal+tax;
+  const monthDisp = month.replace('-','年')+'月';
+
+  // 表紙（合計請求書）
+  const cover = [];
+  const row = i => { while(cover.length<=i) cover.push([]); return cover[i]; };
+  row(0)[6] = '請求書';
+  row(2)[2] = `${settings.clientName||'得意先名'}　様`;
+  row(2)[7] = `登録番号: ${settings.companyInvoiceNo||''}`;
+  row(3)[7] = settings.companyName||'';
+  row(4)[7] = settings.companyAddr||'';
+  row(5)[7] = `TEL: ${settings.companyTel||''}`;
+  row(6)[7] = '【お振込先】';
+  row(7)[2] = `日付：${monthDisp}〆日`;
+  row(7)[7] = settings.bankInfo1||'';
+  row(8)[2] = `御請求額　${total}`;
+  if(settings.bankInfo2) row(8)[7] = settings.bankInfo2;
+  row(10)[2] = '摘要'; row(10)[6] = '金額'; row(10)[8] = '備考';
+  row(11)[2] = `別紙請求書　${totalSlipCount}枚`; row(11)[6] = grandSubtotal;
+  row(12)[2] = '当月分消費税　10％'; row(12)[6] = tax;
+  row(13)[2] = '当月分計'; row(13)[6] = total;
+
+  const coverWs = XLSX.utils.aoa_to_sheet(cover);
+  coverWs['!cols'] = [{wch:4},{wch:4},{wch:20},{wch:8},{wch:8},{wch:8},{wch:12},{wch:8},{wch:16}];
+  const newBook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(newBook, coverWs, '合計請求書');
+  wb.SheetNames.forEach(name=>{ XLSX.utils.book_append_sheet(newBook, wb.Sheets[name], name); });
+
+  XLSX.writeFile(newBook, `${target}月分請求明細一覧.xlsx`);
+  toast('Excelファイルを出力しました');
 }
 
 function printInvoice(){
