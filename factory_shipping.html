@@ -2098,7 +2098,8 @@ function openPrintChecklist(){
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
   closeBs();
   window.print();
-  saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist');
+  saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist',
+    {pallets:JSON.parse(JSON.stringify(targetPallets)), bara:JSON.parse(JSON.stringify(targetBara))});
 
   // 印刷済みフラグを立てる（次回は除外される）
   targetPallets.forEach(p=>{ p.checklistPrinted = true; });
@@ -2137,7 +2138,7 @@ async function pushRecordUpdate(record){
   }catch(e){ toast('通信エラー: '+e.message); }
 }
 
-async function saveDeliveryRecord(slips,date,memo,type){
+async function saveDeliveryRecord(slips,date,memo,type,snapshotOverride){
   const record={
     id:'dh_'+Date.now(),
     timestamp:new Date().toISOString(),
@@ -2146,7 +2147,7 @@ async function saveDeliveryRecord(slips,date,memo,type){
     memo:memo||'',
     type:type,
     slips:slips,
-    palletsSnapshot:{pallets:JSON.parse(JSON.stringify(st.pallets)),bara:JSON.parse(JSON.stringify(st.bara))}
+    palletsSnapshot: snapshotOverride || {pallets:JSON.parse(JSON.stringify(st.pallets)),bara:JSON.parse(JSON.stringify(st.bara))}
   };
   st.deliveryHistory.unshift(record);
   saveLocalState();
