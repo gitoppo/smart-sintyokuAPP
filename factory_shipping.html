@@ -1779,6 +1779,7 @@ function printDelivery(grouped, existingRecord, startNo=1){
     existingRecord.updatedAt=new Date().toISOString();
     saveLocalState();
     renderHistory();
+    pushRecordUpdate(existingRecord);
   } else {
     saveDeliveryRecord(slips,date,memo,'delivery');
   }
@@ -1935,6 +1936,24 @@ function reprintChecklistFromHistory(id){
 }
 
 // ===== 履歴保存 =====
+// 編集済みの既存レコードをGASへ送信（id指定で上書き更新）。③タブでの編集がリロードで消えないようにするため
+async function pushRecordUpdate(record){
+  if(!settings.gasUrl) return;
+  try{
+    const res = await gasPost({action:'updateShipping', record:{
+      id:record.id,
+      timestamp:record.timestamp,
+      deviceName:record.deviceName,
+      deliveryNo:(record.slips&&record.slips.length>0)?record.slips[0].slipNo:'',
+      memo:record.memo,
+      shippingDate:record.shippingDate,
+      type:record.type,
+      palletsJson:JSON.stringify({slips:record.slips,palletsSnapshot:record.palletsSnapshot})
+    }});
+    if(!res || !res.ok) toast('GAS保存エラー: '+(res?res.error:'不明なエラー'));
+  }catch(e){ toast('通信エラー: '+e.message); }
+}
+
 async function saveDeliveryRecord(slips,date,memo,type){
   const record={
     id:'dh_'+Date.now(),
@@ -2123,10 +2142,12 @@ function closeEditModal(){
 
 function saveEditOnly(){
   if(!_editingRecordId) return;
+  const record=st.deliveryHistory.find(r=>r.id===_editingRecordId);
   saveLocalState();
   toast('保存しました');
   closeEditModal();
   renderHistory();
+  if(record) pushRecordUpdate(record);
 }
 
 function saveEditAndReprint(){
