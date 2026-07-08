@@ -35,6 +35,7 @@ function doPost(e) {
     if (action === 'saveMaterialStockSettings') return saveMaterialStockSettings_(p);
     if (action === 'saveMaterialMovement')      return saveMaterialMovement_(p);
     if (action === 'deleteMaterialMovement')    return deleteMaterialMovement_(p);
+    if (action === 'archiveMaterialMovements')   return archiveMaterialMovements_(p);
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -596,6 +597,37 @@ function deleteMaterialMovement_(p) {
     movements = movements.filter(function (m) { return m.id !== p.id; });
     writeJsonSheet_(ss, 'materialMovements', movements);
     return ok({ message: '削除しました' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 起点更新に伴い、起点日以前の入荷・返品を単一のアーカイブシートへ退避する（削除ではなく移動。あとから見返せる）
+function archiveMaterialMovements_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
+  try {
+    const cutoffDate = p.cutoffDate; // 'YYYY-MM-DD'。この日付以前の記録をアーカイブ
+    if (!cutoffDate) return errRes('cutoffDate is required');
+
+    const movements = readJsonSheet_(ss, 'materialMovements');
+    const toArchive = movements.filter(function (m) { return m.date && m.date <= cutoffDate; });
+    const remaining = movements.filter(function (m) { return !(m.date && m.date <= cutoffDate); });
+
+    if (toArchive.length > 0) {
+      let archiveSheet = ss.getSheetByName('materialMovements_archive');
+      if (!archiveSheet) {
+        archiveSheet = ss.insertSheet('materialMovements_archive');
+        archiveSheet.getRange(1, 1, 1, 1).setValues([['json']]);
+      }
+      const startRow = archiveSheet.getLastRow() + 1;
+      const rows = toArchive.map(function (m) { return [JSON.stringify(m)]; });
+      archiveSheet.getRange(startRow, 1, rows.length, 1).setValues(rows);
+    }
+
+    writeJsonSheet_(ss, 'materialMovements', remaining);
+    return ok({ message: toArchive.length + '件をアーカイブしました', archivedCount: toArchive.length });
   } finally {
     lock.releaseLock();
   }
