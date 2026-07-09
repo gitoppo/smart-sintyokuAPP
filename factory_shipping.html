@@ -2931,8 +2931,11 @@ async function confirmMaterialStockBaseline(){
 }
 
 function printMaterialStock(){
-  const d = new Date();
-  const todayStr = today();
+  // 出荷日（①タブの出荷日欄）を基準日とする。納品書は前日に作成することが多いため、
+  // システムの実際の日付ではなく「出荷日」を基準に、その前日在庫と比較する
+  const baseDateStr = document.getElementById('shippingDate').value || today();
+  const d = new Date(baseDateStr+'T00:00:00');
+  const todayStr = baseDateStr;
   const y = new Date(d); y.setDate(y.getDate()-1);
   const yesterdayStr = y.toISOString().slice(0,10);
 
@@ -2959,7 +2962,7 @@ function printMaterialStock(){
         </tr></thead>
         <tbody>
           <tr><td>${yLabel}前日</td>${yesterdayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
-          <tr><td>${dateLabel}本日</td>${todayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
+          <tr><td>${dateLabel}出荷日</td>${todayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
           <tr style="border-top:1px solid #000;"><td>差（納品分）</td>${todayRows.map((r,i)=>{
             const diff = r.qty - (yesterdayRows[i]?yesterdayRows[i].qty:0);
             return `<td>${diff>0?'+':''}${diff}</td>`;
