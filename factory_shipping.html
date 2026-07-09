@@ -247,9 +247,9 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .invoice-print th{background:#eee;}
 
   /* 材料在庫表（横長・エクセル様式） */
-  .msPrintTable{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13pt;font-family:'Noto Serif JP','Hiragino Mincho ProN','MS Mincho',serif;}
-  .msPrintTable th,.msPrintTable td{border:1px solid #000;text-align:center;padding:2.5mm 1mm;overflow:hidden;word-break:break-all;}
-  .msPrintTable th{background:#eee;font-weight:bold;line-height:1.25;font-size:11pt;}
+  .msPrintTable{width:100%;border-collapse:collapse;table-layout:fixed;font-size:10pt;font-family:'Noto Serif JP','Hiragino Mincho ProN','MS Mincho',serif;}
+  .msPrintTable th,.msPrintTable td{border:1px solid #000;text-align:center;padding:0.8mm 1mm;overflow:hidden;word-break:break-all;line-height:1.15;}
+  .msPrintTable th{background:#eee;font-weight:bold;line-height:1.15;font-size:8.5pt;}
   .msPrintTable td:first-child,.msPrintTable th:first-child{font-weight:bold;background:#f5f5f5;}
 }
 @media screen{#printArea{display:none;}}
@@ -2947,10 +2947,10 @@ function printMaterialStock(){
   const cutMarks = `<div class="cut-mark cut-mark-tl"></div><div class="cut-mark cut-mark-tr"></div><div class="cut-mark cut-mark-bl"></div><div class="cut-mark cut-mark-br"></div>`;
 
   const buildTable = (label) => `
-    <div style="padding:4mm 6mm;box-sizing:border-box;height:100%;font-family:'Noto Serif JP','Hiragino Mincho ProN','MS Mincho',serif;">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2mm;">
-        <div style="font-size:12pt;font-weight:bold;">${yearMonth}</div>
-        <div style="font-size:13pt;font-weight:bold;">材料在庫一覧${label?'　'+label:''}</div>
+    <div style="padding:1.5mm 6mm;box-sizing:border-box;height:100%;font-family:'Noto Serif JP','Hiragino Mincho ProN','MS Mincho',serif;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1mm;">
+        <div style="font-size:10.5pt;font-weight:bold;">${yearMonth}</div>
+        <div style="font-size:11.5pt;font-weight:bold;">材料在庫一覧${label?'　'+label:''}</div>
       </div>
       <table class="msPrintTable">
         <thead><tr>
@@ -2964,7 +2964,6 @@ function printMaterialStock(){
             const diff = r.qty - (yesterdayRows[i]?yesterdayRows[i].qty:0);
             return `<td>${diff>0?'+':''}${diff}</td>`;
           }).join('')}</tr>
-          <tr><td>&nbsp;</td>${todayRows.map(()=>'<td>&nbsp;</td>').join('')}</tr>
           <tr><td>&nbsp;</td>${todayRows.map(()=>'<td>&nbsp;</td>').join('')}</tr>
         </tbody>
       </table>
