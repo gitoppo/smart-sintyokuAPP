@@ -2702,6 +2702,35 @@ function isRepairRow(memo, keywords){
   return (keywords||[]).some(k=>k && memo.includes(k));
 }
 
+// 出荷履歴から、指定グループ・指定日「ちょうど」の出荷済み数量を取得（補修分は除外）
+function getShippedQtyByGroupOnDate(group, dateStr){
+  const keywords = (st.materialStock.settings||{}).repairKeywords || [];
+  let total = 0;
+  st.deliveryHistory.forEach(r=>{
+    if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
+    if(r.shippingDate!==dateStr) return;
+    const recordIsRepair = isRepairRow(r.memo, keywords);
+    (r.slips||[]).forEach(s=>{
+      if(s.groupName!==group) return;
+      (s.rows||[]).forEach(row=>{
+        if(recordIsRepair || isRepairRow(row.memo, keywords)) return;
+        total += parseInt(row.qty)||0;
+      });
+    });
+  });
+  return total;
+}
+
+// 材料在庫の入荷・返品movementsから、指定グループ・指定日「ちょうど」・指定タイプの数量を取得
+function getMovementQtyByGroupOnDate(group, dateStr, type){
+  let total = 0;
+  st.materialStock.movements.forEach(m=>{
+    if(m.group!==group || m.date!==dateStr || m.type!==type) return;
+    total += parseInt(m.qty)||0;
+  });
+  return total;
+}
+
 // 出荷履歴から、指定グループ・指定日以降〜指定日(uptoDate)までの出荷済み合計数量を取得（補修分は除外）
 // uptoDateを省略した場合は上限なし（従来どおり全期間）
 function getShippedQtyByGroup(group, afterDate, uptoDate){
@@ -2963,9 +2992,13 @@ function printMaterialStock(){
         <tbody>
           <tr><td>${yLabel}前日</td>${yesterdayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
           <tr><td>${dateLabel}出荷日</td>${todayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
-          <tr style="border-top:1px solid #000;"><td>差（納品分）</td>${todayRows.map((r,i)=>{
-            const diff = r.qty - (yesterdayRows[i]?yesterdayRows[i].qty:0);
-            return `<td>${diff>0?'+':''}${diff}</td>`;
+          <tr style="border-top:1px solid #000;"><td>出荷数（納品分）</td>${todayRows.map(r=>{
+            const q = getShippedQtyByGroupOnDate(r.group, todayStr);
+            return `<td>${q||''}</td>`;
+          }).join('')}</tr>
+          <tr><td>返品数</td>${todayRows.map(r=>{
+            const q = getMovementQtyByGroupOnDate(r.group, todayStr, '返品');
+            return `<td>${q||''}</td>`;
           }).join('')}</tr>
           <tr><td>&nbsp;</td>${todayRows.map(()=>'<td>&nbsp;</td>').join('')}</tr>
         </tbody>
