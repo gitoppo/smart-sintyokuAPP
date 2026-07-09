@@ -959,7 +959,28 @@ function itemOptions(selectedId){
 
 // ===== 品目タイル =====
 let _bsGroup = null; // 現在開いているグループ名
-let _checkVals = {}; // 箱数チェック入力値 {itemId: 入力箱数}
+let _checkVals = {}; // 箱数チェック入力値 {"パレットindex_itemId": 入力箱数}（同一品目が複数パレットに分かれる場合があるため、itemIdだけでなくパレットindexも含めてキーにする）
+function checkKey_(pi, itemId){ return pi + '_' + itemId; }
+
+// ===== 誤削除の取り消し（Undo） =====
+// 直前の削除操作1回分だけ元に戻せる（多段階のUndo履歴は持たない）
+let _undoSnapshot = null;
+function saveUndoSnapshot_(){
+  _undoSnapshot = {
+    pallets: JSON.parse(JSON.stringify(st.pallets)),
+    bara:    JSON.parse(JSON.stringify(st.bara))
+  };
+}
+function undoLastDelete(){
+  if(!_undoSnapshot){ toast('元に戻せる操作がありません'); return; }
+  st.pallets = _undoSnapshot.pallets;
+  st.bara    = _undoSnapshot.bara;
+  _undoSnapshot = null;
+  _checkVals = {}; // パレット構成が変わるため箱数チェックは一旦リセット（要再チェック）
+  saveLocalState(); renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
+  saveShippingWork();
+  toast('元に戻しました');
+}
 
 let _tileEditMode = false;
 let _hiddenTiles = new Set(JSON.parse(localStorage.getItem('hiddenTiles')||'[]'));
@@ -1181,19 +1202,24 @@ function addPallet(){
 }
 function removePallet(idx){
   if(st.pallets.length<=1){ toast('パレットは最低1つ必要です'); return; }
+  saveUndoSnapshot_();
   st.pallets.splice(idx,1);
+  _checkVals = {}; // パレット削除でindexがずれるため、箱数チェックの入力値は一旦リセット（要再チェック）
   saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
+  toast('パレットを削除しました', undoLastDelete);
 }
 function removePalletRowByItemId(pIdx, itemId){
   const rows = st.pallets[pIdx].rows;
   const ri = rows.findIndex(r=>r.itemId==itemId);
   if(ri === -1) return;
+  saveUndoSnapshot_();
   if(rows.length <= 1){
     rows[ri] = {itemId:'', qty:''};
   } else {
     rows.splice(ri, 1);
   }
   saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
+  toast('品目を削除しました', undoLastDelete);
 }
 
 function addPalletRow(idx){
@@ -1202,8 +1228,10 @@ function addPalletRow(idx){
 }
 function removePalletRow(pIdx,rIdx){
   if(st.pallets[pIdx].rows.length<=1){ toast('行は最低1つ必要です'); return; }
+  saveUndoSnapshot_();
   st.pallets[pIdx].rows.splice(rIdx,1);
   saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
+  toast('行を削除しました', undoLastDelete);
 }
 function onPalletChange(pIdx,rIdx,field,val){
   st.pallets[pIdx].rows[rIdx][field] = field==='qty'?(parseInt(val)||''):val;
@@ -1393,19 +1421,21 @@ function calcCases(item, qty){
   return {cases, rem, label};
 }
 
-function onCheckAdj(itemId, delta){
-  const inp = document.getElementById('chk-'+itemId);
+function onCheckAdj(pi, itemId, delta){
+  const key = checkKey_(pi, itemId);
+  const inp = document.getElementById('chk-'+key);
   if(!inp) return;
   const v = Math.max(0,(parseInt(inp.value)||0)+delta);
   inp.value = v;
-  onCheckChange(itemId, v);
+  onCheckChange(pi, itemId, v);
 }
 
-function onCheckChange(itemId, val){
-  _checkVals[itemId] = parseInt(val)||0;
+function onCheckChange(pi, itemId, val){
+  const key = checkKey_(pi, itemId);
+  _checkVals[key] = parseInt(val)||0;
   // 一致・不一致のスタイル更新
-  const inp = document.getElementById('chk-'+itemId);
-  const expected = document.getElementById('chk-exp-'+itemId);
+  const inp = document.getElementById('chk-'+key);
+  const expected = document.getElementById('chk-exp-'+key);
   if(!inp||!expected) return;
   const exp = parseInt(expected.dataset.cases)||0;
   if(parseInt(val)===0){ inp.classList.remove('match','nomatch'); return; }
@@ -1435,8 +1465,8 @@ function renderPallets(){
             if(qty > doneQty) qtyClass='over';
           }
 
-          // 箱数チェック欄
-          const checkVal = _checkVals[r.itemId]||0;
+          // 箱数チェック欄（パレットindex+itemIdで一意化。同じ品目が複数パレットに分かれても混同しない）
+          const checkVal = _checkVals[checkKey_(pi, r.itemId)]||0;
           const checkMatch = checkVal>0 && checkVal===cases;
           const checkCls = checkVal===0?'':(checkMatch?'match':'nomatch');
 
@@ -1453,15 +1483,15 @@ function renderPallets(){
             <div style="text-align:center;">
               <div style="font-size:11px;color:#666;margin-bottom:2px;">箱数チェック</div>
               <div class="check-box">
-                <button class="check-adj" onclick="onCheckAdj('${r.itemId}',-1)">－</button>
-                <input class="check-inp ${checkCls}" id="chk-${r.itemId}" type="number" min="0" value="${checkVal||''}"
-                  oninput="onCheckChange('${r.itemId}',this.value)">
-                <button class="check-adj" onclick="onCheckAdj('${r.itemId}',1)">＋</button>
+                <button class="check-adj" onclick="onCheckAdj(${pi},'${r.itemId}',-1)">－</button>
+                <input class="check-inp ${checkCls}" id="chk-${checkKey_(pi, r.itemId)}" type="number" min="0" value="${checkVal||''}"
+                  oninput="onCheckChange(${pi},'${r.itemId}',this.value)">
+                <button class="check-adj" onclick="onCheckAdj(${pi},'${r.itemId}',1)">＋</button>
               </div>
             </div>
             <div style="text-align:center;">
               <div style="font-size:11px;color:#666;margin-bottom:2px;">箱数</div>
-              <div class="pallet-row-case" id="chk-exp-${r.itemId}" data-cases="${cases}">${caseLabel_}</div>
+              <div class="pallet-row-case" id="chk-exp-${checkKey_(pi, r.itemId)}" data-cases="${cases}">${caseLabel_}</div>
             </div>
             `:''}
             <div style="text-align:center;">
@@ -1507,26 +1537,31 @@ function addBaraRow(){
 }
 function removeBaraRow(idx){
   if(st.bara.length<=1){ toast('行は最低1つ必要です'); return; }
+  saveUndoSnapshot_();
   st.bara.splice(idx,1);
   saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
+  toast('行を削除しました', undoLastDelete);
 }
 function removeBaraRowByItemId(itemId){
   const ri = st.bara.findIndex(r=>r.itemId==itemId);
   if(ri === -1) return;
+  saveUndoSnapshot_();
   if(st.bara.length <= 1){
     st.bara[ri] = {itemId:'', qty:''};
   } else {
     st.bara.splice(ri, 1);
   }
   saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
+  toast('バラを削除しました', undoLastDelete);
 }
 function clearAllBara(){
   const hasContent = st.bara.some(r=>r.itemId&&r.qty);
   if(!hasContent){ toast('バラは空です'); return; }
   if(!confirm('バラの内容をすべて削除します。よろしいですか？')) return;
+  saveUndoSnapshot_();
   st.bara = [{itemId:'',qty:''}];
   saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
-  toast('バラを削除しました');
+  toast('バラを全削除しました', undoLastDelete);
 }
 
 function onBaraChange(idx,field,val){
@@ -1758,7 +1793,7 @@ async function openPrintDelivery(){
 
   // ③箱数チェック不一致チェック（ブロック）※バラ・印刷対象外パレットは対象外
   const unchecked = [], nomatch = [];
-  st.pallets.forEach(p=>{
+  st.pallets.forEach((p,pi)=>{
     if(p.printTarget===false) return; // 印刷対象外のパレットはチェック不要
     p.rows.forEach(r=>{
       if(!r.itemId||!r.qty) return;
@@ -1766,8 +1801,8 @@ async function openPrintDelivery(){
       if(!item||!item.caseQty||item.caseQty<=0) return;
       const expectedCases = Math.floor((parseInt(r.qty)||0)/item.caseQty);
       if(expectedCases===0) return; // 端数のみ（1箱未満）はチェック不要
-      const checkVal = _checkVals[r.itemId]||0;
-      const label = `${item.name}${item.color?' ('+item.color+')':''}`;
+      const checkVal = _checkVals[checkKey_(pi, r.itemId)]||0;
+      const label = `パレット${pi+1} ${item.name}${item.color?' ('+item.color+')':''}`;
       if(checkVal===0) unchecked.push(label+`: ${expectedCases}箱`);
       else if(checkVal!==expectedCases) nomatch.push(label+`: チェック${checkVal}箱 ≠ 登録${expectedCases}箱`);
     });
@@ -2936,11 +2971,17 @@ function toJST(isoStr){
 function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function toast(msg){
+function toast(msg, undoFn){
   const el=document.getElementById('toast');
-  el.textContent=msg; el.style.display='block';
   clearTimeout(el._t);
-  el._t=setTimeout(()=>{el.style.display='none';},3500);
+  if(undoFn){
+    el.innerHTML = esc(msg)+' <button type="button" style="margin-left:10px;background:#4a90d9;color:#fff;border:none;border-radius:12px;padding:4px 12px;font-size:12px;cursor:pointer;">元に戻す</button>';
+    el.querySelector('button').onclick = ()=>{ el.style.display='none'; clearTimeout(el._t); undoFn(); };
+  } else {
+    el.textContent=msg;
+  }
+  el.style.display='block';
+  el._t=setTimeout(()=>{el.style.display='none';}, undoFn?8000:3500);
 }
 function showLoading(v){
   document.getElementById('loading').style.display=v?'flex':'none';
