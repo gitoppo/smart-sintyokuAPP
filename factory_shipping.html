@@ -1624,24 +1624,38 @@ function collectAllRows(){
   return rows;
 }
 function groupRowsByGroup(allRows){
-  const gMap={};
+  // 材料在庫の「補修キーワード」設定を流用し、行の備考にキーワードが含まれる場合は
+  // 通常納品分とは別グループ（＝別の伝票）として分離する
+  const repairKeywords = (st.materialStock.settings||{}).repairKeywords || [];
+
+  const gMap={};    // 通常分
+  const gMapEx={};  // 補修分・貼り直し分など（例外キーワード該当）
   allRows.forEach(r=>{
     const g=r.item.group||'未分類';
-    if(!gMap[g]) gMap[g]={};
+    const isEx = isRepairRow(r.memo, repairKeywords);
+    const map = isEx ? gMapEx : gMap;
+    if(!map[g]) map[g]={};
     const k=r.item.id;
-    if(!gMap[g][k]) gMap[g][k]={item:r.item,qty:0,memo:r.memo||''};
-    gMap[g][k].qty+=r.qty;
-    if(r.memo) gMap[g][k].memo=r.memo;
+    if(!map[g][k]) map[g][k]={item:r.item,qty:0,memo:r.memo||''};
+    map[g][k].qty+=r.qty;
+    if(r.memo) map[g][k].memo=r.memo;
   });
-  const result = Object.entries(gMap).map(([groupName,itemMap])=>({groupName,rows:Object.values(itemMap)}));
 
-  // 並び順を品目マスター（＝品目タイルの表示順）に揃える。関連グループが隣り合わせになり、伝票番号も連続しやすくなる
   const groupOrder = {};
   st.itemMaster.forEach(m=>{
     const g = m.group || '未分類';
     if(!(g in groupOrder)) groupOrder[g] = Object.keys(groupOrder).length;
   });
-  result.sort((a,b)=>(groupOrder[a.groupName]??999) - (groupOrder[b.groupName]??999));
+
+  const toResult = (map, isRepair) => Object.entries(map).map(([groupName,itemMap])=>({groupName,rows:Object.values(itemMap),isRepair}));
+  const result = [...toResult(gMap,false), ...toResult(gMapEx,true)];
+
+  // 並び順を品目マスター（＝品目タイルの表示順）に揃える。同じグループ内では通常分を先に、補修分をその直後に並べる
+  result.sort((a,b)=>{
+    const oa=groupOrder[a.groupName]??999, ob=groupOrder[b.groupName]??999;
+    if(oa!==ob) return oa-ob;
+    return (a.isRepair?1:0)-(b.isRepair?1:0);
+  });
 
   return result;
 }
@@ -1840,7 +1854,7 @@ async function openPrintDelivery(){
     }
   }));
 
-  const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName).join('\n');
+  const slipList = grouped.map((g,i)=>'  '+autoSlipNo(date,i,startNo)+' '+g.groupName+(g.isRepair?'［補修・貼り直し分］':'')).join('\n');
   let msg = '以下の納品書を発行しますか？\n\n出荷日: '+date+'\n\n'+slipList;
   if(underItems.length>0) msg += '\n\n⚠ 以下の品目は計画残数より少ない数量です:\n'+underItems.join('\n');
   msg += '\n\n発行すると履歴に保存されます。';
@@ -1940,7 +1954,7 @@ function printDelivery(grouped, existingRecord, startNo=1){
     const subtotal=rows.reduce((s,r)=>s+r.amount,0);
     const tax=Math.floor(subtotal*TAX_RATE);
     const total=subtotal+tax;
-    return {slipNo,groupName:g.groupName,rows,subtotal,tax,total};
+    return {slipNo,groupName:g.groupName,isRepair:!!g.isRepair,rows,subtotal,tax,total};
   });
 
   const dividerHTML='';
@@ -2002,7 +2016,7 @@ function buildSlipHTML(slip,date,memo){
           <div style="border-bottom:1px solid #000;display:inline-block;min-width:60mm;padding-bottom:0.5mm;font-size:13pt;"><b>${esc(settings.clientName)||'得意先名'}</b> 御中</div>
           ${memo?`<div style="font-size:8pt;margin-top:0.5mm;">備考: ${esc(memo)}</div>`:''}
         </div>
-        <div style="font-size:12pt;font-weight:bold;">品名：${esc(slip.groupName)}</div>
+        <div style="font-size:12pt;font-weight:bold;">品名：${esc(slip.groupName)}${slip.isRepair?'　［補修・貼り直し分］':''}</div>
       </div>
       <div style="text-align:right;font-size:8pt;">
         <div style="font-size:8.5pt;">${esc(settings.companyName)||'自社名'}</div>
@@ -2989,4 +3003,3 @@ function showLoading(v){
 </script>
 </body>
 </html>
-
