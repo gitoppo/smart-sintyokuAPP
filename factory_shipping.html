@@ -2702,13 +2702,15 @@ function isRepairRow(memo, keywords){
   return (keywords||[]).some(k=>k && memo.includes(k));
 }
 
-// 出荷履歴から、指定グループ・指定日以降の出荷済み合計数量を取得（補修分は除外）
-function getShippedQtyByGroup(group, afterDate){
+// 出荷履歴から、指定グループ・指定日以降〜指定日(uptoDate)までの出荷済み合計数量を取得（補修分は除外）
+// uptoDateを省略した場合は上限なし（従来どおり全期間）
+function getShippedQtyByGroup(group, afterDate, uptoDate){
   const keywords = (st.materialStock.settings||{}).repairKeywords || [];
   let total = 0;
   st.deliveryHistory.forEach(r=>{
     if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
     if(!r.shippingDate || r.shippingDate <= afterDate) return;
+    if(uptoDate && r.shippingDate > uptoDate) return; // 基準日より後の出荷は含めない
     const recordIsRepair = isRepairRow(r.memo, keywords); // 伝票全体（出荷メモ）での判定
     (r.slips||[]).forEach(s=>{
       if(s.groupName!==group) return;
@@ -2722,7 +2724,8 @@ function getShippedQtyByGroup(group, afterDate){
 }
 
 // 現在庫数を算出：起点在庫 + 入荷 − 返品 − 出荷（起点日より後の分）
-function computeMaterialStock(){
+// asOfDateを指定すると「その日時点」の在庫を計算できる（前日在庫チェック用）。省略時は従来どおり全期間（＝現在庫）
+function computeMaterialStock(asOfDate){
   const settings = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
   const baselineDate = settings.baselineDate || '0000-00-00';
   const enabled = settings.enabledGroups || [];
@@ -2733,10 +2736,11 @@ function computeMaterialStock(){
     let nyuka = 0, henpin = 0;
     st.materialStock.movements.forEach(m=>{
       if(m.group!==g.name || !m.date || m.date<=baselineDate) return;
+      if(asOfDate && m.date > asOfDate) return; // 基準日より後の入荷・返品は含めない
       if(m.type==='入荷') nyuka += parseInt(m.qty)||0;
       else if(m.type==='返品') henpin += parseInt(m.qty)||0;
     });
-    const shukka = getShippedQtyByGroup(g.name, baselineDate);
+    const shukka = getShippedQtyByGroup(g.name, baselineDate, asOfDate);
     const qty = baseline + nyuka - henpin - shukka;
     return {group:g.name, dispName:g.dispName, qty};
   });
@@ -2927,11 +2931,18 @@ async function confirmMaterialStockBaseline(){
 }
 
 function printMaterialStock(){
-  const rows = computeMaterialStock();
-  if(rows.length===0){ toast('対象グループを設定してください'); return; }
   const d = new Date();
+  const todayStr = today();
+  const y = new Date(d); y.setDate(y.getDate()-1);
+  const yesterdayStr = y.toISOString().slice(0,10);
+
+  const todayRows = computeMaterialStock(todayStr);
+  if(todayRows.length===0){ toast('対象グループを設定してください'); return; }
+  const yesterdayRows = computeMaterialStock(yesterdayStr);
+
   const weekdays = ['日','月','火','水','木','金','土'];
   const dateLabel = `${d.getMonth()+1}/${d.getDate()}(${weekdays[d.getDay()]})`;
+  const yLabel = `${y.getMonth()+1}/${y.getDate()}(${weekdays[y.getDay()]})`;
   const yearMonth = `${d.getFullYear()}年${d.getMonth()+1}月`;
   const cutMarks = `<div class="cut-mark cut-mark-tl"></div><div class="cut-mark cut-mark-tr"></div><div class="cut-mark cut-mark-bl"></div><div class="cut-mark cut-mark-br"></div>`;
 
@@ -2944,10 +2955,17 @@ function printMaterialStock(){
       <table class="msPrintTable">
         <thead><tr>
           <th style="width:16mm;"></th>
-          ${rows.map(r=>`<th>${esc(r.dispName)}</th>`).join('')}
+          ${todayRows.map(r=>`<th>${esc(r.dispName)}</th>`).join('')}
         </tr></thead>
         <tbody>
-          <tr><td>${dateLabel}</td>${rows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
+          <tr><td>${yLabel}前日</td>${yesterdayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
+          <tr><td>${dateLabel}本日</td>${todayRows.map(r=>`<td>${r.qty}</td>`).join('')}</tr>
+          <tr style="border-top:1px solid #000;"><td>差（納品分）</td>${todayRows.map((r,i)=>{
+            const diff = r.qty - (yesterdayRows[i]?yesterdayRows[i].qty:0);
+            return `<td>${diff>0?'+':''}${diff}</td>`;
+          }).join('')}</tr>
+          <tr><td>&nbsp;</td>${todayRows.map(()=>'<td>&nbsp;</td>').join('')}</tr>
+          <tr><td>&nbsp;</td>${todayRows.map(()=>'<td>&nbsp;</td>').join('')}</tr>
         </tbody>
       </table>
     </div>
@@ -3003,4 +3021,3 @@ function showLoading(v){
 </script>
 </body>
 </html>
-
