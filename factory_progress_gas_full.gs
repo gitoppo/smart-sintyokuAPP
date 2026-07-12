@@ -8,7 +8,6 @@ function doGet(e) {
     if (action === 'ping') return ok({ message: 'pong' });
     if (action === 'getAll') return getAll_();
     if (action === 'getShipping') return getShipping_();
-    if (action === 'getMaterialStock') return getMaterialStock_();
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -25,17 +24,7 @@ function doPost(e) {
     if (action === 'saveOperationLog')    return saveOperationLog_(p);
     if (action === 'saveAll')             return saveAll_(p);
     if (action === 'saveShipping')        return saveShipping_(p);
-    if (action === 'updateShipping')      return updateShipping_(p);
-    if (action === 'saveShippingWork')    return saveShippingWork_(p);
-    if (action === 'deleteShipping')      return deleteShipping_(p);
-    if (action === 'getSlipNo')           return getSlipNo_(p);
     if (action === 'saveStock')           return saveStock_(p);
-    if (action === 'archiveOldMonths')    return archiveOldMonths_(p);
-    if (action === 'archiveOperationLog') return archiveOperationLog_(p);
-    if (action === 'saveMaterialStockSettings') return saveMaterialStockSettings_(p);
-    if (action === 'saveMaterialMovement')      return saveMaterialMovement_(p);
-    if (action === 'deleteMaterialMovement')    return deleteMaterialMovement_(p);
-    if (action === 'archiveMaterialMovements')   return archiveMaterialMovements_(p);
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -196,25 +185,34 @@ function saveAll_(p) {
 }
 
 // ============================================================
-// stock（ストックタブ：計画とは独立した品目別ストック数量）
+// stock（ストックタブ：端末別管理）
 // ============================================================
 function saveStock_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000); // 最大10秒待機
+    lock.waitLock(10000);
   } catch (e) {
     return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
   }
   try {
-    writeStockSheet_(ss, p.stock || {});
+    const current = readStockSheet_(ss);
+    const incoming = p.stock || {};
+    Object.keys(incoming).forEach(function(itemId) {
+      var entry = incoming[itemId] || {};
+      if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
+      Object.keys(entry).forEach(function(deviceDateKey) {
+        current[itemId][deviceDateKey] = entry[deviceDateKey];
+      });
+    });
+    writeStockSheet_(ss, current);
     return ok({});
   } finally {
     lock.releaseLock();
   }
 }
 
-// stockシート: itemId,qty
+// stockシート: itemId, entry(JSON)
 function readStockSheet_(ss) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) return {};
@@ -224,7 +222,8 @@ function readStockSheet_(ss) {
   for (var i = 1; i < data.length; i++) {
     var r = data[i];
     if (!r[0]) continue;
-    result[String(r[0])] = Number(r[1] || 0);
+    try { result[String(r[0])] = JSON.parse(String(r[1] || '{}')); }
+    catch(e) { result[String(r[0])] = {}; }
   }
   return result;
 }
@@ -233,9 +232,9 @@ function writeStockSheet_(ss, stock) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) sheet = ss.insertSheet('stock');
   sheet.clearContents();
-  var rows = [['itemId','qty']];
+  var rows = [['itemId', 'entry']];
   Object.keys(stock).forEach(function(itemId) {
-    rows.push([itemId, stock[itemId]]);
+    rows.push([itemId, JSON.stringify(stock[itemId] || {})]);
   });
   sheet.getRange(1, 1, rows.length, 2).setValues(rows);
 }
@@ -386,253 +385,6 @@ function toDateString_(v) {
 }
 
 // レスポンスヘルパー
-// ============================================================
-// メンテナンス：月次アーカイブ（plans/progress）・古いoperationLog削除
-// ============================================================
-
-// 当月より前の月のplans/progressを月別アーカイブシートへ退避し、元シートから削除する
-function archiveOldMonths_(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(15000);
-  } catch (e) {
-    return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
-  }
-  try {
-    const plans = readPlansSheet_(ss);
-    const progress = readProgressSheet_(ss);
-    const currentMonth = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM');
-
-    // 当月より前の月ごとにplansをグループ化
-    const byMonth = {};
-    plans.forEach(function (pl) {
-      const month = (pl.date || '').slice(0, 7); // 'yyyy-MM'
-      if (!month || month >= currentMonth) return; // 当月・日付不明は対象外
-      if (!byMonth[month]) byMonth[month] = [];
-      byMonth[month].push(pl);
-    });
-
-    const archivedMonths = Object.keys(byMonth).sort();
-    if (archivedMonths.length === 0) {
-      return ok({ message: 'アーカイブ対象の月はありませんでした（当月より前の計画データなし）', archivedMonths: [] });
-    }
-
-    archivedMonths.forEach(function (month) {
-      const monthPlans = byMonth[month];
-      const planIds = {};
-      monthPlans.forEach(function (pl) { planIds[pl.id] = true; });
-
-      appendPlansArchive_(ss, month, monthPlans);
-
-      const monthProgress = {};
-      Object.keys(progress).forEach(function (planId) {
-        if (planIds[planId]) monthProgress[planId] = progress[planId];
-      });
-      appendProgressArchive_(ss, month, monthProgress);
-    });
-
-    // 元のplans/progressから、アーカイブ済みの月のデータを削除
-    const remainingPlans = plans.filter(function (pl) {
-      const month = (pl.date || '').slice(0, 7);
-      return !month || month >= currentMonth;
-    });
-    writePlansSheet_(ss, remainingPlans);
-
-    const remainingPlanIds = {};
-    remainingPlans.forEach(function (pl) { remainingPlanIds[pl.id] = true; });
-    const remainingProgress = {};
-    Object.keys(progress).forEach(function (planId) {
-      if (remainingPlanIds[planId]) remainingProgress[planId] = progress[planId];
-    });
-    writeProgressSheet_(ss, remainingProgress);
-
-    return ok({ message: 'アーカイブ完了: ' + archivedMonths.join(', '), archivedMonths: archivedMonths });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// plansアーカイブシートへ追記（月ごとに1シート、既存があれば末尾に追加）
-function appendPlansArchive_(ss, month, plansArr) {
-  const shName = 'plans_archive_' + month;
-  let sheet = ss.getSheetByName(shName);
-  if (!sheet) {
-    sheet = ss.insertSheet(shName);
-    sheet.getRange(1, 1, 1, 6).setValues([['id', 'date', 'itemId', 'qty', 'memo', 'priority']]);
-  }
-  if (plansArr.length === 0) return;
-  const rows = plansArr.map(function (pl) {
-    return [pl.id, pl.date, pl.itemId, pl.qty, pl.memo || '', pl.priority ? 'TRUE' : 'FALSE'];
-  });
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 6).setValues(rows);
-}
-
-// progressアーカイブシートへ追記（月ごとに1シート、既存があれば末尾に追加）
-function appendProgressArchive_(ss, month, progressObj) {
-  const shName = 'progress_archive_' + month;
-  let sheet = ss.getSheetByName(shName);
-  if (!sheet) {
-    sheet = ss.insertSheet(shName);
-    sheet.getRange(1, 1, 1, 3).setValues([['planId', 'preDone', 'postDone']]);
-  }
-  const keys = Object.keys(progressObj);
-  if (keys.length === 0) return;
-  const rows = keys.map(function (k) {
-    return [k, progressObj[k].preDone || 0, JSON.stringify(progressObj[k].postDone || {})];
-  });
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
-}
-
-// operationLogの古い行を、単一のアーカイブシートへ移動する（削除ではなく退避）
-// ※ 月ごとにシートを分けず1枚に集約：行数は多くなるが、タブ数が際限なく増えるのを防ぐため
-//    アーカイブシートは通常の読み込み処理(getAll_)の対象外なので、読み込み速度には影響しない
-var OPERATION_LOG_KEEP_MONTHS = 3; // 保持期間（月数）。変更したい場合はここを編集する
-
-function archiveOperationLog_(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(15000);
-  } catch (e) {
-    return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
-  }
-  try {
-    const sheet = ss.getSheetByName('operationLog');
-    if (!sheet) return ok({ message: 'operationLogシートがありません', archivedCount: 0 });
-
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return ok({ message: '対象がありませんでした', archivedCount: 0 });
-
-    const header = data[0];
-    const keepMonths = (p && p.keepMonths) || OPERATION_LOG_KEEP_MONTHS;
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - keepMonths);
-
-    const kept = [header];
-    const toArchive = [];
-    for (let i = 1; i < data.length; i++) {
-      const ts = data[i][0];
-      const d = ts ? new Date(ts) : null;
-      if (d && !isNaN(d.getTime()) && d < cutoff) {
-        toArchive.push(data[i]);
-      } else {
-        kept.push(data[i]);
-      }
-    }
-
-    if (toArchive.length === 0) {
-      return ok({ message: 'アーカイブ対象はありませんでした', archivedCount: 0 });
-    }
-
-    // アーカイブ先シートへ追記（1枚のみ、月ごとに分けない）
-    let archiveSheet = ss.getSheetByName('operationLog_archive');
-    if (!archiveSheet) {
-      archiveSheet = ss.insertSheet('operationLog_archive');
-      archiveSheet.getRange(1, 1, 1, header.length).setValues([header]);
-    }
-    archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, toArchive.length, header.length).setValues(toArchive);
-
-    // 元のoperationLogから、アーカイブした行を除去
-    sheet.clearContents();
-    sheet.getRange(1, 1, kept.length, header.length).setValues(kept);
-
-    return ok({ message: toArchive.length + '件をoperationLog_archiveへ退避しました', archivedCount: toArchive.length });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// ============================================================
-// ok/errRes ヘルパー
-// ============================================================
-// ============================================================
-// 材料在庫（客先支給の板金加工品在庫管理）
-// ============================================================
-
-// 設定（対象グループのON/OFF・起点在庫）＋ 入荷・返品の手入力履歴を取得
-function getMaterialStock_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const settingsArr = readJsonSheet_(ss, 'materialStockSettings');
-  const settings = settingsArr[0] || { enabledGroups: [], baseline: {}, baselineDate: '' };
-  const movements = readJsonSheet_(ss, 'materialMovements');
-  return ok({ settings: settings, movements: movements });
-}
-
-// 設定（対象グループ・起点在庫）を保存（毎回上書き）
-function saveMaterialStockSettings_(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
-  try {
-    writeJsonSheet_(ss, 'materialStockSettings', [p.settings || {}]);
-    return ok({ message: '設定を保存しました' });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// 入荷・返品の1件を追記
-function saveMaterialMovement_(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
-  try {
-    const movements = readJsonSheet_(ss, 'materialMovements');
-    movements.push(p.movement);
-    writeJsonSheet_(ss, 'materialMovements', movements);
-    return ok({ message: '保存しました' });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// 入荷・返品の1件を削除
-function deleteMaterialMovement_(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
-  try {
-    let movements = readJsonSheet_(ss, 'materialMovements');
-    movements = movements.filter(function (m) { return m.id !== p.id; });
-    writeJsonSheet_(ss, 'materialMovements', movements);
-    return ok({ message: '削除しました' });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// 起点更新に伴い、起点日以前の入荷・返品を単一のアーカイブシートへ退避する（削除ではなく移動。あとから見返せる）
-function archiveMaterialMovements_(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
-  try {
-    const cutoffDate = p.cutoffDate; // 'YYYY-MM-DD'。この日付以前の記録をアーカイブ
-    if (!cutoffDate) return errRes('cutoffDate is required');
-
-    const movements = readJsonSheet_(ss, 'materialMovements');
-    const toArchive = movements.filter(function (m) { return m.date && m.date <= cutoffDate; });
-    const remaining = movements.filter(function (m) { return !(m.date && m.date <= cutoffDate); });
-
-    if (toArchive.length > 0) {
-      let archiveSheet = ss.getSheetByName('materialMovements_archive');
-      if (!archiveSheet) {
-        archiveSheet = ss.insertSheet('materialMovements_archive');
-        archiveSheet.getRange(1, 1, 1, 1).setValues([['json']]);
-      }
-      const startRow = archiveSheet.getLastRow() + 1;
-      const rows = toArchive.map(function (m) { return [JSON.stringify(m)]; });
-      archiveSheet.getRange(startRow, 1, rows.length, 1).setValues(rows);
-    }
-
-    writeJsonSheet_(ss, 'materialMovements', remaining);
-    return ok({ message: toArchive.length + '件をアーカイブしました', archivedCount: toArchive.length });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
 function ok(data) {
   data.ok = true;
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
@@ -656,29 +408,11 @@ function getShipping_() {
     const headers = rows[0];
     const records = rows.slice(1).map(row => {
       const obj = {};
-      headers.forEach((h, i) => {
-        // 日付型はYYYY-MM-DD文字列に変換
-        if (row[i] instanceof Date) {
-          obj[h] = Utilities.formatDate(row[i], 'Asia/Tokyo', 'yyyy-MM-dd');
-        } else {
-          obj[h] = row[i];
-        }
-      });
+      headers.forEach((h, i) => obj[h] = row[i]);
       return obj;
     });
-
-    // パレット入力中データ（shippingWork）も合わせて返す（端末間共有のため）
-    let workData = null;
-    const workSheet = ss.getSheetByName('shippingWork');
-    if (workSheet && workSheet.getLastRow() >= 2) {
-      const raw = workSheet.getRange(2, 1).getValue();
-      if (raw) {
-        try { workData = JSON.parse(raw); } catch (e) { workData = null; }
-      }
-    }
-
     return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, deliveryHistory: records, workData: workData }))
+      .createTextOutput(JSON.stringify({ ok: true, deliveryHistory: records }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch(err) {
     return ContentService
@@ -693,20 +427,19 @@ function saveShipping_(p) {
     let sheet = ss.getSheetByName('deliveryHistory');
     if (!sheet) {
       sheet = ss.insertSheet('deliveryHistory');
-      sheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate','type']);
+      sheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate']);
     }
-
-    // 既存シートに type 列が無ければ追加（後方互換：以前のシートにはこの列が無かったため）
-    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    if (headers.indexOf('type') === -1) {
-      sheet.getRange(1, headers.length + 1).setValue('type');
-      headers = headers.concat(['type']);
-    }
-
     const records = p.records || [];
-    records.forEach(function (r) {
-      const row = headers.map(function (h) { return (r[h] !== undefined && r[h] !== null) ? r[h] : ''; });
-      sheet.appendRow(row);
+    records.forEach(r => {
+      sheet.appendRow([
+        r.id || '',
+        r.timestamp || '',
+        r.deviceName || '',
+        r.deliveryNo || '',
+        r.memo || '',
+        r.palletsJson || '',
+        r.shippingDate || ''
+      ]);
     });
     return ContentService
       .createTextOutput(JSON.stringify({ ok: true }))
@@ -714,164 +447,6 @@ function saveShipping_(p) {
   } catch(err) {
     return ContentService
       .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// 出荷履歴の既存レコードをid指定で上書き更新する（③タブでの編集の保存用。見つからなければ新規追加にフォールバック）
-function updateShipping_(p) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-  } catch (e) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: 'サーバー混雑中です。少し待って再試行してください' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName('deliveryHistory');
-    if (!sheet) {
-      sheet = ss.insertSheet('deliveryHistory');
-      sheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate','type']);
-    }
-
-    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    if (headers.indexOf('type') === -1) {
-      sheet.getRange(1, headers.length + 1).setValue('type');
-      headers = headers.concat(['type']);
-    }
-
-    const r = p.record;
-    if (!r || !r.id) {
-      return ContentService
-        .createTextOutput(JSON.stringify({ ok: false, error: 'record.id is required' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    const idColIdx = headers.indexOf('id');
-    const data = sheet.getDataRange().getValues();
-    let targetRow = -1;
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][idColIdx] === r.id) { targetRow = i + 1; break; }
-    }
-
-    const rowValues = headers.map(function (h) { return (r[h] !== undefined && r[h] !== null) ? r[h] : ''; });
-    if (targetRow > 0) {
-      sheet.getRange(targetRow, 1, 1, headers.length).setValues([rowValues]);
-    } else {
-      // 万一見つからなければ、データを失わないよう新規行として追加
-      sheet.appendRow(rowValues);
-    }
-
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, updated: targetRow > 0 }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch(err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-
-function saveShippingWork_(p) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName('shippingWork');
-    if (!sheet) {
-      sheet = ss.insertSheet('shippingWork');
-      sheet.appendRow(['json']);
-    }
-    if (sheet.getLastRow() < 2) sheet.appendRow(['']);
-    sheet.getRange(2, 1).setValue(JSON.stringify(p.workData || {}));
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch(err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function deleteShipping_(p) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('deliveryHistory');
-    if (!sheet) return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: 'シートが見つかりません' }))
-      .setMimeType(ContentService.MimeType.JSON);
-
-    const rows = sheet.getDataRange().getValues();
-    for(let i = rows.length - 1; i >= 1; i--){
-      if(String(rows[i][0]) === String(p.id)){
-        sheet.deleteRow(i + 1);
-        return ContentService
-          .createTextOutput(JSON.stringify({ ok: true }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-    }
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: '該当IDが見つかりません' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch(err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function getSlipNo_(p) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const date = String(p.date || '').slice(0, 10);
-    const sheet = ss.getSheetByName('deliveryHistory');
-    
-    let maxNo = 0;
-    if (sheet && sheet.getLastRow() >= 2) {
-      const rows = sheet.getDataRange().getValues();
-      const headers = rows[0];
-      const dateIdx   = headers.indexOf('shippingDate');
-      const noIdx     = headers.indexOf('deliveryNo');
-      const jsonIdx   = headers.indexOf('palletsJson');
-      
-      rows.slice(1).forEach(row => {
-        // 日付型・文字列型どちらにも対応
-        let rowDate = '';
-        const rawDate = row[dateIdx];
-        if (rawDate instanceof Date) {
-          rowDate = Utilities.formatDate(rawDate, 'Asia/Tokyo', 'yyyy-MM-dd');
-        } else {
-          rowDate = String(rawDate || '').slice(0, 10);
-        }
-        if (rowDate !== date) return;
-        
-        // deliveryNo列から取得
-        const no = String(row[noIdx] || '');
-        const m1 = no.match(/(\d+)$/);
-        if (m1) { const n = parseInt(m1[1]); if (n > maxNo) maxNo = n; }
-        
-        // palletsJsonのslipsから全slipNoを取得
-        try {
-          const pj = JSON.parse(String(row[jsonIdx] || '{}'));
-          (pj.slips || []).forEach(s => {
-            const m2 = String(s.slipNo || '').match(/(\d+)$/);
-            if (m2) { const n = parseInt(m2[1]); if (n > maxNo) maxNo = n; }
-          });
-        } catch(e2) {}
-      });
-    }
-    
-    const startNo = maxNo + 1;
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, startNo: startNo }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch(err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: err.message, startNo: 1 }))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
