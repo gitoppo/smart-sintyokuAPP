@@ -1218,13 +1218,14 @@ function renderP2SheetBody(g) {
 
   body.innerHTML = g.items.map(r => {
     const planId = r.plan.id;
-    return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center">
-      <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}</div>
-      <button class="p2-adj-btn" onclick="p2Adjust('${planId}',-1)">－</button>
+    const isDone = r.qty > 0 && r.totalVal >= r.qty;
+    return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center${isDone ? ';opacity:0.5' : ''}">
+      <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}${isDone ? ' ✅' : ''}</div>
+      <button class="p2-adj-btn" onclick="p2Adjust('${planId}',-1)" ${isDone ? 'disabled' : ''}>－</button>
       <input class="p2-num-input" type="number" id="p2-inp-${planId}"
         value="${r.myTodayVal}" min="0"
-        onchange="p2SetPost('${planId}',this.value)">
-      <button class="p2-adj-btn" onclick="p2Adjust('${planId}',1)">＋</button>
+        onchange="p2SetPost('${planId}',this.value)" ${isDone ? 'disabled' : ''}>
+      <button class="p2-adj-btn" onclick="p2Adjust('${planId}',1)" ${isDone ? 'disabled' : ''}>＋</button>
       <div style="display:flex;gap:12px;margin-left:auto;align-items:baseline;flex-shrink:0">
         <div style="text-align:center">
           <div style="font-size:12px;color:var(--muted)">予定</div>
