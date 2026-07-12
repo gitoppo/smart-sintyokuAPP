@@ -1266,22 +1266,33 @@ function closeP2Sheet() {
 }
 
 // ============================================================
-// ストックタブ（計画とは独立した品目別ストック数量）
-// 運用：1人が1品目を担当することで個人進捗を把握する想定のため、
-// データはシンプルに「品目ごとの数値」のみ（端末別の区別なし）
+// ストックタブ（計画とは独立した品目別ストック数量／端末別管理）
+// 運用：st.stock[itemId] = { "端末名_YYYY-MM-DD": 数値 }（②個人タブのpostDoneと同形式）
 // ============================================================
 let _stockOpenGroup = null;
 
 function buildStockGroups() {
-  // 品目マスター順・グループ名（表示名）単位でまとめる
-  // 「追加済み」＝グループ内に1つでもst.stockにキーが存在する品目があるグループを表示
+  const dn = st.deviceName;
+  const today = todayStr();
   const map = {};
   st.itemMaster.forEach(item => {
     const groupName = dispN(item);
     if (!map[groupName]) map[groupName] = { name: groupName, items: [] };
-    const hasKey = st.stock && Object.prototype.hasOwnProperty.call(st.stock, item.id);
-    const qty = toNum(st.stock[item.id]);
-    map[groupName].items.push({ item, colorName: dispC(item), qty, hasKey });
+    const entry = (st.stock && st.stock[item.id]) || null;
+    const hasKey = entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+      ? Object.prototype.hasOwnProperty.call(st.stock, item.id)
+      : Object.prototype.hasOwnProperty.call(st.stock || {}, item.id);
+    const totalVal = entry && typeof entry === 'object' ? calcPostTotal(entry) : toNum(entry);
+    const dayKey = dn ? dn + '_' + today : null;
+    const myTodayVal = (entry && typeof entry === 'object' && dayKey) ? toNum(entry[dayKey]) : 0;
+    const myTotalVal = (entry && typeof entry === 'object' && dn) ? Object.entries(entry).reduce((s, [k, v]) => {
+      if (k === dn) {
+        const hasNew = Object.keys(entry).some(nk => nk.startsWith(dn + '_'));
+        return hasNew ? s : s + toNum(v);
+      }
+      return k.startsWith(dn + '_') ? s + toNum(v) : s;
+    }, 0) : 0;
+    map[groupName].items.push({ item, colorName: dispC(item), hasKey, totalVal, myTodayVal, myTotalVal });
   });
   return Object.values(map).filter(g => g.items.some(r => r.hasKey));
 }
@@ -1289,24 +1300,21 @@ function buildStockGroups() {
 function renderStock() {
   const grid = document.getElementById('stock-tile-grid');
   if (!grid) return;
-
   const groups = buildStockGroups();
   if (!groups.length) {
     grid.innerHTML = '<div class="text-muted f12" style="padding:20px;text-align:center;grid-column:1/-1">ストックがありません</div>';
     return;
   }
-
   grid.innerHTML = groups.map(g => {
-    const totalQty = g.items.reduce((s, r) => s + r.qty, 0);
+    const totalQty = g.items.reduce((s, r) => s + r.totalVal, 0);
     return `<div class="p2-tile" onclick="openStockSheet('${esc(g.name)}')">
       <div class="p2-tile-name">${esc(g.name)} <span style="font-size:13px;color:#fbbf24;font-weight:700">［ストック］</span></div>
       <div style="margin-top:10px;text-align:center">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:3px">ストック数</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:3px">全端末合計</div>
         <div style="font-size:42px;font-weight:700;color:#fbbf24;line-height:1;display:inline-block;transform-origin:center top;transform:scaleX(${String(totalQty).length >= 3 ? 0.7 : 1})">${totalQty}</div>
       </div>
     </div>`;
   }).join('');
-
   if (_stockOpenGroup) {
     const g = groups.find(gg => gg.name === _stockOpenGroup);
     if (g) renderStockSheetBody(g);
@@ -1316,19 +1324,27 @@ function renderStock() {
 function renderStockSheetBody(g) {
   document.getElementById('stock-sheet-title').innerHTML = `${esc(g.name)} <span style="font-size:13px;color:#fbbf24;font-weight:700">［ストック］</span>`;
   const body = document.getElementById('stock-sheet-body');
-
   const focused = document.activeElement;
   if (focused && focused.classList.contains('stock-num-input')) return;
-
   body.innerHTML = g.items.map(r => {
     const itemId = r.item.id;
     return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center">
       <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}</div>
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',-1)">－</button>
       <input class="p2-num-input stock-num-input" type="number" id="stock-inp-${itemId}"
-        value="${r.qty}" min="0"
+        value="${r.myTodayVal}" min="0"
         onchange="stockSetQty('${itemId}',this.value)">
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',1)">＋</button>
+      <div style="display:flex;gap:12px;margin-left:auto;align-items:baseline;flex-shrink:0">
+        <div style="text-align:center">
+          <div style="font-size:12px;color:#f87171">全端末</div>
+          <div style="font-size:26px;font-weight:700;color:#f87171">${r.totalVal}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:12px;color:#fbbf24">自分累計</div>
+          <div style="font-size:26px;font-weight:700;color:#fbbf24">${r.myTotalVal}</div>
+        </div>
+      </div>
     </div>`;
   }).join('') + `
     <div style="padding:16px 4px 4px">
@@ -1339,7 +1355,7 @@ function renderStockSheetBody(g) {
 }
 
 function askDeleteStockGroup(groupName) {
-  if (!confirm(`「${groupName}」のストックを削除しますか？\n入力した数量も全て消えます。`)) return;
+  if (!confirm(`「${groupName}」のストックを削除しますか？\n全端末分の入力数量も全て消えます。`)) return;
   st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
     if (st.stock) delete st.stock[it.id];
   });
@@ -1380,8 +1396,12 @@ function stockAdjust(itemId, delta) {
 }
 
 function stockSetQty(itemId, val) {
+  const dn = st.deviceName;
+  if (!dn) { alert('端末名が未設定です。⚙️設定タブで設定してください。'); return; }
   if (!st.stock) st.stock = {};
-  st.stock[itemId] = Math.max(0, toNum(val));
+  if (!st.stock[itemId] || typeof st.stock[itemId] !== 'object') st.stock[itemId] = {};
+  const dayKey = dn + '_' + todayStr();
+  st.stock[itemId][dayKey] = Math.max(0, toNum(val));
   saveLocal();
   debouncedStockSave();
   renderStock();
@@ -2668,18 +2688,28 @@ function applyCloudData(json, forceShiftAttend) {
     }
   }
   if (json.stock && typeof json.stock === 'object') {
-    // クラウドの値とローカルの値を比較し、大きい方を採用（送信失敗時でもローカル入力値を保護）
-    const cloudStock = {};
-    Object.entries(json.stock).forEach(([k,v]) => { cloudStock[k] = toNum(v); });
-    if (!st.stock) st.stock = {};
-    Object.keys(cloudStock).forEach(k => {
-      // クラウドの値がローカルより大きい場合のみ上書き（ローカルの入力値を保護）
-      const localVal = toNum(st.stock[k]);
-      const cloudVal = cloudStock[k];
-      if (cloudVal > localVal) st.stock[k] = cloudVal;
-      else if (!(k in st.stock)) st.stock[k] = cloudVal; // ローカルにないキーは追加
+    const dn = st.deviceName;
+    const today = todayStr();
+    // 自端末の今日分を退避
+    const myLocal = {};
+    Object.entries(st.stock || {}).forEach(([itemId, entry]) => {
+      if (dn && entry && typeof entry === 'object') {
+        const dayKey = dn + '_' + today;
+        if (dayKey in entry) myLocal[itemId] = toNum(entry[dayKey]);
+      }
     });
-    // クラウドに存在しないキーはそのまま残す（削除操作は明示的な操作時のみ）
+    st.stock = {};
+    Object.entries(json.stock).forEach(([itemId, entry]) => {
+      st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
+    });
+    // 自端末の今日分を復元（ローカル優先）
+    if (dn) {
+      const dayKey = dn + '_' + today;
+      Object.entries(myLocal).forEach(([itemId, localVal]) => {
+        if (!st.stock[itemId]) st.stock[itemId] = {};
+        st.stock[itemId][dayKey] = localVal;
+      });
+    }
   }
 }
 
