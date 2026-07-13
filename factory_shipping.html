@@ -228,29 +228,6 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .slip-table th{background:#eee;}
   .slip-total{text-align:right;font-size:8pt;margin-top:1mm;}
 
-  /* チェックリスト：2列4パレット（A4上下2分割） */
-  /* 構成: 上段138mm + カットライン8mm + 下段131mm(余白7mm込み) = 277mm */
-  .checklist-page{width:100%;page-break-after:always;}
-  .checklist-page:last-child{page-break-after:auto;}
-  .checklist-row{display:grid;grid-template-columns:1fr 1fr;gap:0;}
-  .checklist-row-top .checklist-cell{height:138mm;}
-  .checklist-row-bottom .checklist-cell{height:131mm;padding-top:10mm;}
-  .checklist-cell{box-sizing:border-box;overflow:hidden;padding:3mm 4mm;border:none;}
-  .checklist-row .checklist-cell:first-child{padding-left:1mm;padding-right:7mm;}
-  .checklist-row .checklist-cell:last-child{padding-left:7mm;padding-right:1mm;}
-  .checklist-cutline{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;}
-  .checklist-cutline-line{width:12mm;border-top:0.5px dashed #000;flex:none;}
-  .checklist-cutline-label{display:none;}
-  .checklist-pallet{height:100%;box-sizing:border-box;}
-  .checklist-pallet-inner{height:100%;box-sizing:border-box;}
-  .checklist-title{font-size:13pt;font-weight:bold;margin-bottom:2mm;}
-  .checklist-table{width:100%;border-collapse:collapse;font-size:12pt;}
-  .checklist-table th,.checklist-table td{border:1px solid #000;height:22px;padding:0 2mm;line-height:22px;}
-  .checklist-table th{background:#eee;font-size:11pt;}
-  .checklist-check{width:10mm;text-align:center;font-size:13pt;}
-  .checklist-divider{display:none;}
-  .checklist-page-break{page-break-after:always;}
-
   /* 請求書印刷 */
   .invoice-print{font-size:10.5pt;}
   .invoice-print table{width:100%;border-collapse:collapse;}
@@ -263,6 +240,32 @@ tr:nth-child(even) td{background:#f9f9f9;}
   .msPrintTable th{background:#eee;font-weight:bold;line-height:1.15;font-size:8.5pt;}
   .msPrintTable td:first-child,.msPrintTable th:first-child{font-weight:bold;background:#f5f5f5;}
 }
+
+/* チェックリスト：2列4パレット（A4上下2分割）
+   ※あえて@media printの外に置いている。印刷前（画面上）でサイズを実測して自動縮小するため、
+   　常にサイズ定義が有効になっている必要がある（#printArea自体は@media screenで非表示のまま）。 */
+/* 構成: 上段138mm + カットライン8mm + 下段131mm(余白7mm込み) = 277mm */
+.checklist-page{width:100%;page-break-after:always;}
+.checklist-page:last-child{page-break-after:auto;}
+.checklist-row{display:grid;grid-template-columns:1fr 1fr;gap:0;}
+.checklist-row-top .checklist-cell{height:138mm;}
+.checklist-row-bottom .checklist-cell{height:131mm;padding-top:10mm;}
+.checklist-cell{box-sizing:border-box;overflow:hidden;padding:3mm 4mm;border:none;}
+.checklist-row .checklist-cell:first-child{padding-left:1mm;padding-right:7mm;}
+.checklist-row .checklist-cell:last-child{padding-left:7mm;padding-right:1mm;}
+.checklist-cutline{width:100%;height:8mm;display:flex;align-items:center;justify-content:space-between;}
+.checklist-cutline-line{width:12mm;border-top:0.5px dashed #000;flex:none;}
+.checklist-cutline-label{display:none;}
+.checklist-pallet{height:100%;box-sizing:border-box;}
+.checklist-pallet-inner{height:100%;box-sizing:border-box;}
+.checklist-title{font-size:13pt;font-weight:bold;margin-bottom:2mm;}
+.checklist-table{width:100%;border-collapse:collapse;font-size:12pt;}
+.checklist-table th,.checklist-table td{border:1px solid #000;height:22px;padding:0 2mm;line-height:22px;}
+.checklist-table th{background:#eee;font-size:11pt;}
+.checklist-check{width:10mm;text-align:center;font-size:13pt;}
+.checklist-divider{display:none;}
+.checklist-page-break{page-break-after:always;}
+
 @media screen{#printArea{display:none;}}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
@@ -2194,6 +2197,12 @@ function paginateChecklistBlocks(blocks){
 
 // 印刷直前に実測して、枠からはみ出しているコマだけをその場で縮小する（環境・フォント差異があっても確実に収める）
 function fitChecklistPrintArea(){
+  const printArea = document.getElementById('printArea');
+  // #printAreaは画面上は@media screenでdisplay:noneのため、そのままではclientHeight等が0になり測定できない。
+  // 測定中だけインラインstyleで強制的に表示する（印刷そのものは@media printのdisplay:block!importantが効くので影響なし）
+  const prevDisplay = printArea.style.display;
+  printArea.style.display = 'block';
+
   document.querySelectorAll('.checklist-fit-cell').forEach(cell=>{
     const inner = cell.querySelector('.checklist-pallet-inner');
     if(!inner) return;
@@ -2203,6 +2212,8 @@ function fitChecklistPrintArea(){
     if(natural <= avail || avail <= 0) return;
     inner.style.zoom = Math.max(0.45, avail / natural); // 読めなくなるほどは縮めない（下限45%）
   });
+
+  printArea.style.display = prevDisplay; // 画面上の表示は元に戻す（印刷は@media printのルールが別途効く）
 }
 
 function openPrintChecklist(){
