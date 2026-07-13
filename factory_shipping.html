@@ -266,7 +266,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .checklist-divider{display:none;}
 .checklist-page-break{page-break-after:always;}
 
-@media screen{#printArea{display:none;}}
+@media screen{#printArea{position:fixed;left:-99999px;top:0;}}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 </head>
@@ -2199,12 +2199,6 @@ function paginateChecklistBlocks(blocks){
 // ※印刷専用のレンダリングでは非標準のzoomプロパティが正しく反映されないことがあるため、
 // 　font-size/line-height/heightという標準プロパティを直接書き換える方式にしている
 function fitChecklistPrintArea(){
-  const printArea = document.getElementById('printArea');
-  // #printAreaは画面上は@media screenでdisplay:noneのため、そのままではclientHeight等が0になり測定できない。
-  // 測定中だけインラインstyleで強制的に表示する（印刷そのものは@media printのdisplay:block!importantが効くので影響なし）
-  const prevDisplay = printArea.style.display;
-  printArea.style.display = 'block';
-
   const DEFAULT = {rowH:22, font:12};
   const MIN     = {rowH:11, font:6};
 
@@ -2234,8 +2228,6 @@ function fitChecklistPrintArea(){
     table.style.fontSize = newFont+'pt';
     cells.forEach(c=>{ c.style.height=newRowH+'px'; c.style.lineHeight=newRowH+'px'; });
   });
-
-  printArea.style.display = prevDisplay; // 画面上の表示は元に戻す（印刷は@media printのルールが別途効く）
 }
 
 function openPrintChecklist(){
@@ -2315,7 +2307,8 @@ function executeChecklistPrint(targetPallets, targetBara){
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
   fitChecklistPrintArea();
   closeBs();
-  window.print();
+  // 描画が確定してから印刷する（スタイル変更直後だとブラウザによっては反映前に印刷されることがあるため）
+  requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));
   saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist',
     {pallets:JSON.parse(JSON.stringify(targetPallets)), bara:JSON.parse(JSON.stringify(targetBara))});
 
@@ -2335,7 +2328,7 @@ function reprintChecklistFromHistory(id){
   if(blocks.length===0){ toast('この履歴には品目データがありません'); return; }
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
   fitChecklistPrintArea();
-  window.print();
+  requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));
 }
 
 // ===== 履歴保存 =====
