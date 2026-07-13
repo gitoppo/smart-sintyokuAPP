@@ -99,6 +99,17 @@ tr:nth-child(even) td{background:#f9f9f9;}
 .manualSlipRow{display:grid;grid-template-columns:1fr 55px 70px 1fr 28px;gap:6px;align-items:center;margin-bottom:6px;}
 .manualSlipRow input{font-size:13px;padding:5px 6px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box;}
 
+/* ===== チェックリスト印刷対象選択モーダル ===== */
+#checklistSelectModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9994;display:none;align-items:center;justify-content:center;}
+#checklistSelectModal.open{display:flex;}
+#checklistSelectModalInner{background:#fff;border-radius:8px;padding:20px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto;}
+.csItem{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-bottom:6px;font-size:13px;}
+.csItem input{width:18px;height:18px;flex:none;}
+.csItem .csLabel{flex:1;}
+.csItem .csTag{font-size:11px;padding:2px 6px;border-radius:10px;}
+.csItem .csTag.done{background:#e2f0d9;color:#385723;}
+.csItem .csTag.new{background:#fff3cd;color:#856404;}
+
 /* ===== 材料在庫 設定モーダル ===== */
 #msSettingsModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9992;display:none;align-items:center;justify-content:center;}
 #msSettingsModal.open{display:flex;}
@@ -305,6 +316,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <button class="btn-primary" style="padding:10px 16px;font-size:15px;" onclick="addPallet()">＋ パレット追加</button>
     <button class="btn-success" style="padding:10px 16px;font-size:15px;" onclick="openPrintDelivery()">🖨 納品書印刷</button>
     <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openPrintChecklist()">📋 チェックリスト印刷</button>
+    <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openChecklistSelectModalManual()">☑️ パレット選択印刷</button>
     <button class="btn-warn" style="padding:10px 16px;font-size:15px;" onclick="openChecklistMatrix()">🧮 チェックリスト入力</button>
     <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openManualSlipModal()">✏️ 手入力で納品書作成</button>
   </div>
@@ -440,6 +452,19 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="display:flex;gap:8px;margin-top:8px;">
       <button class="btn-success" onclick="submitManualSlip()">🖨 発行</button>
       <button class="btn-gray" onclick="closeManualSlipModal()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- チェックリスト印刷対象選択モーダル -->
+<div id="checklistSelectModal">
+  <div id="checklistSelectModalInner">
+    <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">📋 印刷するパレット・バラを選択</div>
+    <div style="font-size:12px;color:#666;margin-bottom:10px;">チェックを入れたものだけを印刷します。</div>
+    <div id="checklistSelectList"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn-success" onclick="submitChecklistSelect()">🖨 選択したものを印刷</button>
+      <button class="btn-gray" onclick="closeChecklistSelectModal()">キャンセル</button>
     </div>
   </div>
 </div>
@@ -2187,22 +2212,69 @@ function openPrintChecklist(){
   const newPallets = validPallets.filter(p=>!p.checklistPrinted);
   const includeBara = validBara.length>0 && !st.baraChecklistPrinted;
 
-  let targetPallets, targetBara;
-  if(newPallets.length===0 && !includeBara){
-    // 未印刷の品目が無い＝全部印刷済み。確認のうえ、希望があれば全部を再印刷する
-    if(!confirm('未印刷のパレット・バラはありません（すべて印刷済みです）。\n全パレット・バラを改めて印刷し直しますか？')) return;
-    targetPallets = validPallets;
-    targetBara = validBara;
-  } else {
-    // 通常は未印刷分だけを対象にする
+  // 未印刷分がある場合は、これまでどおりワンタップで未印刷分だけ即印刷（通常運用を邪魔しない）
+  if(newPallets.length>0 || includeBara){
     const skippedCount = validPallets.length - newPallets.length;
     if(skippedCount>0 || (validBara.length>0 && !includeBara)){
-      if(!confirm(`未印刷分（パレット${newPallets.length}件${includeBara?'＋バラ':''}）だけを印刷します。\n（印刷済みのパレット${skippedCount}件は除外されます）\n\nよろしいですか？`)) return;
+      if(!confirm(`未印刷分（パレット${newPallets.length}件${includeBara?'＋バラ':''}）だけを印刷します。\n（印刷済みのパレット${skippedCount}件は除外されます）\n\nよろしいですか？\n\n※特定のパレットだけ選んで印刷したい場合は「キャンセル」→「パレット選択印刷」ボタンをお使いください`)) return;
     }
-    targetPallets = newPallets;
-    targetBara = includeBara ? validBara : [];
+    executeChecklistPrint(newPallets, includeBara?validBara:[]);
+    return;
   }
 
+  // 未印刷分が無い＝全部印刷済み。個別選択できるモーダルを開く
+  openChecklistSelectModal(validPallets, validBara);
+}
+
+// ①タブに「パレット選択印刷」ボタンからも呼べる、特定パレットだけを選んで印刷するモーダル
+function openChecklistSelectModalManual(){
+  const validPallets=st.pallets.filter(p=>p.rows.some(r=>r.itemId&&r.qty));
+  const validBara=st.bara.filter(r=>r.itemId&&r.qty);
+  if(validPallets.length===0 && validBara.length===0){ toast('品目を登録してください'); return; }
+  openChecklistSelectModal(validPallets, validBara);
+}
+
+function openChecklistSelectModal(validPallets, validBara){
+  const listEl = document.getElementById('checklistSelectList');
+  const palletLabel = (p,pi) => {
+    const names = p.rows.filter(r=>r.itemId&&r.qty).map(r=>{
+      const item = st.itemMaster.find(m=>m.id==r.itemId);
+      return item ? item.name : '';
+    }).filter(Boolean);
+    const uniq = [...new Set(names)];
+    return `パレット${pi+1}（${uniq.slice(0,2).join('・')}${uniq.length>2?' 他':''}）`;
+  };
+  listEl.innerHTML = [
+    ...validPallets.map((p,i)=>{
+      const pi = st.pallets.indexOf(p);
+      return `<label class="csItem">
+        <input type="checkbox" data-kind="pallet" data-idx="${pi}" ${!p.checklistPrinted?'checked':''}>
+        <span class="csLabel">${esc(palletLabel(p,pi))}</span>
+        <span class="csTag ${p.checklistPrinted?'done':'new'}">${p.checklistPrinted?'印刷済み':'未印刷'}</span>
+      </label>`;
+    }),
+    validBara.length>0 ? `<label class="csItem">
+      <input type="checkbox" data-kind="bara" ${!st.baraChecklistPrinted?'checked':''}>
+      <span class="csLabel">🚗 バラ</span>
+      <span class="csTag ${st.baraChecklistPrinted?'done':'new'}">${st.baraChecklistPrinted?'印刷済み':'未印刷'}</span>
+    </label>` : ''
+  ].join('');
+  document.getElementById('checklistSelectModal').classList.add('open');
+}
+function closeChecklistSelectModal(){
+  document.getElementById('checklistSelectModal').classList.remove('open');
+}
+function submitChecklistSelect(){
+  const checked = [...document.querySelectorAll('#checklistSelectList input[type=checkbox]:checked')];
+  if(checked.length===0){ toast('印刷するものを選んでください'); return; }
+  const targetPallets = checked.filter(c=>c.dataset.kind==='pallet').map(c=>st.pallets[parseInt(c.dataset.idx)]);
+  const targetBara = checked.some(c=>c.dataset.kind==='bara') ? st.bara.filter(r=>r.itemId&&r.qty) : [];
+  closeChecklistSelectModal();
+  executeChecklistPrint(targetPallets, targetBara);
+}
+
+// 実際の印刷処理（対象パレット・バラを指定して印刷し、履歴保存・印刷済みフラグ付けまで行う）
+function executeChecklistPrint(targetPallets, targetBara){
   const date=document.getElementById('shippingDate').value||today();
   const blocks = buildChecklistBlocks(targetPallets, targetBara, date);
   if(blocks.length===0){ toast('印刷対象がありません'); return; }
