@@ -859,9 +859,13 @@ async function saveShippingWork(){
     await gasPost({action:'saveShippingWork', workData});
     st.lastSyncedWorkAt = workData.updatedAt; // 自分がpushした内容を最新として記録（次回起動時の誤った未同期判定を防ぐ）
     saveLocalState();
+    _localDirty = false; // 保存完了。ここまでの編集はサーバーに反映済み
   }
   catch(e){ console.warn('作業中データ保存エラー',e); }
 }
+
+// 未保存のローカル編集があるかどうか（trueの間はポーリングによるサーバー上書きを止める）
+let _localDirty = false;
 
 let _pollTimer=null;
 function startPolling(){
@@ -869,9 +873,11 @@ function startPolling(){
   _pollTimer = setInterval(async()=>{
     if(!settings.gasUrl) return;
     try{
+      if(_localDirty) return; // 未保存の編集がある間はサーバーの内容で上書きしない（データ消失防止）
       const shData = await gasGet('getShipping');
       if(!shData||!shData.workData) return;
       if(shData.workData.updatedAt === st.lastSyncedWorkAt) return; // 変更なし
+      if(_localDirty) return; // 通信中に編集が入った場合も念のため再チェック
       const focused = document.activeElement;
       if(focused&&(focused.tagName==='INPUT'||focused.tagName==='SELECT'||focused.tagName==='TEXTAREA')) return;
       if(shData.workData.pallets) st.pallets = shData.workData.pallets;
@@ -885,6 +891,7 @@ function startPolling(){
 
 let _workSaveTimer=null;
 function debounceWorkSave(){
+  _localDirty = true; // 編集発生。保存完了までポーリングでの上書きを止める
   clearTimeout(_workSaveTimer);
   _workSaveTimer = setTimeout(()=>{ saveShippingWork(); }, 2000);
 }
@@ -2255,11 +2262,30 @@ function renderHistory(){
         <div style="display:flex;gap:6px;margin-top:8px;">
           ${!isChecklistRecord(r)?`<button class="btn-warn btn-sm" onclick="openEditModal('${r.id}')">✏️ 編集・再印刷</button>`:''}
           ${isChecklistRecord(r)?`<button class="btn-warn btn-sm" onclick="reprintChecklistFromHistory('${r.id}')">🖨 再印刷</button>`:''}
+          ${isChecklistRecord(r)?`<button class="btn-gray btn-sm" onclick="restorePalletsFromHistory('${r.id}')">↩️ ①タブへ復元</button>`:''}
           <button class="btn-danger btn-sm" onclick="deleteRecord('${r.id}')">🗑 削除</button>
         </div>
       </div>
     </div>
   `).join('');
+}
+
+// チェックリスト履歴のpalletsSnapshotを①タブに復元する（誤って上書き・削除された場合の緊急復旧用）
+function restorePalletsFromHistory(id){
+  const record = st.deliveryHistory.find(r=>r.id===id);
+  if(!record){ toast('履歴が見つかりません'); return; }
+  const snap = record.palletsSnapshot || {pallets:[],bara:[]};
+  if((!snap.pallets||snap.pallets.length===0) && (!snap.bara||snap.bara.length===0)){
+    toast('この履歴には復元できる品目データがありません'); return;
+  }
+  if(!confirm('①タブの現在の内容を、この履歴（'+(record.shippingDate||'')+'）の内容で上書きします。\n現在①タブに入力中の内容は失われます。よろしいですか？')) return;
+  st.pallets = JSON.parse(JSON.stringify(snap.pallets && snap.pallets.length>0 ? snap.pallets : [newPallet()]));
+  st.bara    = JSON.parse(JSON.stringify(snap.bara||[]));
+  _checkVals = {}; // パレット構成が変わるため箱数チェックはリセット
+  saveLocalState(); renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
+  saveShippingWork();
+  toast('①タブに復元しました');
+  showTab('tabPallet');
 }
 
 // チェックリスト履歴のサマリー表示（パレットスナップショットから）
