@@ -397,6 +397,10 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="font-size:12px;color:#666;margin-bottom:10px;">
       出荷分は、出荷履歴から自動的に差し引かれます。入荷・返品はこの画面で入力してください。
     </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <label style="font-size:12px;color:#666;">在庫表の出荷日<br><span style="font-size:10px;color:#999;">（①タブの出荷日欄とは別に、印刷時だけ切り替えられます）</span></label>
+      <input type="date" id="msShippingDate" style="padding:6px 8px;font-size:13px;">
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <button class="btn-gray btn-sm" onclick="openMaterialStockSettings()">⚙️ 対象グループ・起点在庫の設定</button>
       <button class="btn-success no-print" onclick="printMaterialStock()">🖨 在庫表を印刷</button>
@@ -3136,9 +3140,9 @@ async function confirmMaterialStockBaseline(){
 }
 
 function printMaterialStock(){
-  // 出荷日（①タブの出荷日欄）を基準日とする。納品書は前日に作成することが多いため、
-  // システムの実際の日付ではなく「出荷日」を基準に、その前日在庫と比較する
-  const baseDateStr = document.getElementById('shippingDate').value || today();
+  // 出荷日（⑤タブの出荷日欄。①タブとは別の独立した入力欄）を基準日とする。
+  // 納品書は前日に作成することが多いため、システムの実際の日付ではなく「出荷日」を基準に、その前日在庫と比較する
+  const baseDateStr = document.getElementById('msShippingDate').value || document.getElementById('shippingDate').value || today();
   const d = new Date(baseDateStr+'T00:00:00');
   const todayStr = baseDateStr;
   const y = new Date(d); y.setDate(y.getDate()-1);
@@ -3201,6 +3205,11 @@ function showTab(id){
   document.querySelectorAll('.tab')[tabs.indexOf(id)]?.classList.add('active');
   if(id==='tabMaterial') renderMaterial();
   if(id==='tabHistory')  renderHistory();
+  if(id==='tabMaterialStock'){
+    // ⑤タブを開くたびに、①タブの出荷日をその時点の初期値としてコピーする（以降は独立・保存はしない）
+    const msDate = document.getElementById('msShippingDate');
+    if(msDate) msDate.value = document.getElementById('shippingDate').value || today();
+  }
 }
 
 // ===== ユーティリティ =====
