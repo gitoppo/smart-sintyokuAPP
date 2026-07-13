@@ -2153,37 +2153,13 @@ function checklistDefaultSizing(){
 // blocks配列 → ページ割りHTMLを生成。
 // 通常の品目数のパレットは、これまでどおり2件ずつ1ページ（上段・下段）にまとめる。
 // 品目数が多いパレット（LARGE_THRESHOLDを超える）は、上下分割せず1ページを丸ごと使う。
+// 経過措置：A4上下2分割はやめて、1パレットにつき1ページ（A4フル）で印刷する
+// （見切れ対策の応急処置。原因調査が済み次第、上下2分割に戻すことも検討）
 function paginateChecklistBlocks(blocks){
-  const LARGE_THRESHOLD = 17; // これを超える品目数のパレットは、半ページに詰め込まず専用の1ページを使う
   const sizing = checklistDefaultSizing();
-  const cutlineHTML=`<div class="checklist-cutline">
-    <div class="checklist-cutline-line"></div>
-    <div class="checklist-cutline-label"></div>
-    <div class="checklist-cutline-line"></div>
-  </div>`;
-
-  const normalBlocks = blocks.filter(b=>b.rows.length<=LARGE_THRESHOLD);
-  const largeBlocks   = blocks.filter(b=>b.rows.length>LARGE_THRESHOLD);
-
   let printContent='';
 
-  for(let i=0; i<normalBlocks.length; i+=2){
-    const group=normalBlocks.slice(i,i+2);
-    const top = group[0]||null, bottom = group[1]||null;
-    printContent+=`<div class="checklist-page">
-      <div class="checklist-row checklist-row-top">
-        <div class="checklist-cell checklist-fit-cell">${top?renderChecklistBlock(top,false,sizing):''}</div>
-        <div class="checklist-cell checklist-fit-cell">${top?renderChecklistBlock(top,true,sizing):''}</div>
-      </div>
-      ${cutlineHTML}
-      <div class="checklist-row checklist-row-bottom">
-        <div class="checklist-cell checklist-fit-cell">${bottom?renderChecklistBlock(bottom,false,sizing):''}</div>
-        <div class="checklist-cell checklist-fit-cell">${bottom?renderChecklistBlock(bottom,true,sizing):''}</div>
-      </div>
-    </div>`;
-  }
-
-  largeBlocks.forEach(b=>{
+  blocks.forEach(b=>{
     printContent+=`<div class="checklist-page">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;height:270mm;">
         <div class="checklist-fit-cell" style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;">${renderChecklistBlock(b,false,sizing)}</div>
@@ -2201,13 +2177,17 @@ function paginateChecklistBlocks(blocks){
 function fitChecklistPrintArea(){
   const DEFAULT = {rowH:22, font:12};
   const MIN     = {rowH:11, font:6};
+  let debugInfo = [];
 
-  document.querySelectorAll('.checklist-fit-cell').forEach(cell=>{
+  const cellsFound = document.querySelectorAll('.checklist-fit-cell');
+  debugInfo.push('対象セル数: '+cellsFound.length);
+
+  cellsFound.forEach((cell,ci)=>{
     const inner = cell.querySelector('.checklist-pallet-inner');
-    if(!inner) return;
+    if(!inner){ debugInfo.push(`[${ci}] innerなし（空セル）`); return; }
     const table = inner.querySelector('table.checklist-table');
     const cells = inner.querySelectorAll('td,th');
-    if(!table) return;
+    if(!table){ debugInfo.push(`[${ci}] tableなし`); return; }
 
     // いったん既定サイズにリセットしてから測定する（再計算のため）
     table.style.fontSize = DEFAULT.font+'pt';
@@ -2215,7 +2195,8 @@ function fitChecklistPrintArea(){
 
     const avail = cell.clientHeight - (parseFloat(getComputedStyle(cell).paddingTop)||0) - (parseFloat(getComputedStyle(cell).paddingBottom)||0);
     const natural = inner.scrollHeight; // 既定サイズでの自然な高さ
-    if(natural <= avail || avail <= 0) return; // 収まっていれば何もしない
+    debugInfo.push(`[${ci}] cell.clientHeight=${cell.clientHeight} avail=${avail.toFixed(1)} natural=${natural} 行数=${cells.length}`);
+    if(natural <= avail || avail <= 0){ debugInfo.push(`[${ci}] → 縮小不要と判定`); return; }
 
     // タイトル部分は縮小しないので、その分を除いた「表部分」の縮小率を計算する
     const titleEl = inner.querySelector('.checklist-title');
@@ -2225,9 +2206,13 @@ function fitChecklistPrintArea(){
     const ratio = Math.max(MIN.rowH/DEFAULT.rowH, availForTable/naturalForTable);
     const newRowH = Math.max(MIN.rowH, Math.round(DEFAULT.rowH*ratio));
     const newFont = Math.max(MIN.font, Math.round(DEFAULT.font*ratio*10)/10);
+    debugInfo.push(`[${ci}] → 縮小適用 ratio=${ratio.toFixed(2)} rowH:${DEFAULT.rowH}→${newRowH}px font:${DEFAULT.font}→${newFont}pt`);
     table.style.fontSize = newFont+'pt';
     cells.forEach(c=>{ c.style.height=newRowH+'px'; c.style.lineHeight=newRowH+'px'; });
   });
+
+  console.log('[チェックリスト印刷 診断ログ]\n'+debugInfo.join('\n'));
+  window._checklistFitDebug = debugInfo; // コンソールで _checklistFitDebug と入力すると再確認できます
 }
 
 function openPrintChecklist(){
