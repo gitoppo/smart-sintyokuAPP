@@ -2141,19 +2141,9 @@ function renderChecklistBlock(block, isCopy, sizing){
   </div></div>`;
 }
 
-// 行数と配置枠（上段/下段/全ページ）から、収まるように行の高さ・フォントサイズを決める
-// 通常サイズで収まる行数までは既定サイズのまま。超える場合のみ縮小する（下限あり）
-function checklistSizing(rowCount, slot){
-  const DEFAULT = {rowH:22, font:12, headerFont:11};
-  const MIN     = {rowH:13, font:7,  headerFont:7};
-  const capacity = slot==='top' ? 17 : slot==='bottom' ? 14 : 32; // 'full'=1ページ丸ごと使う場合（余裕を持たせた基準値）
-  if(rowCount<=capacity || rowCount===0) return DEFAULT;
-  const ratio = capacity/rowCount;
-  return {
-    rowH:       Math.max(MIN.rowH, Math.round(DEFAULT.rowH*ratio)),
-    font:       Math.max(MIN.font, Math.round(DEFAULT.font*ratio*10)/10),
-    headerFont: Math.max(MIN.headerFont, Math.round(DEFAULT.headerFont*ratio*10)/10)
-  };
+// 行の既定サイズ（実際に収まるかどうかは印刷直前にfitChecklistPrintArea()で実測して調整する）
+function checklistDefaultSizing(){
+  return {rowH:22, font:12, headerFont:11};
 }
 
 
@@ -2162,6 +2152,7 @@ function checklistSizing(rowCount, slot){
 // 品目数が多いパレット（LARGE_THRESHOLDを超える）は、上下分割せず1ページを丸ごと使う。
 function paginateChecklistBlocks(blocks){
   const LARGE_THRESHOLD = 17; // これを超える品目数のパレットは、半ページに詰め込まず専用の1ページを使う
+  const sizing = checklistDefaultSizing();
   const cutlineHTML=`<div class="checklist-cutline">
     <div class="checklist-cutline-line"></div>
     <div class="checklist-cutline-label"></div>
@@ -2176,32 +2167,42 @@ function paginateChecklistBlocks(blocks){
   for(let i=0; i<normalBlocks.length; i+=2){
     const group=normalBlocks.slice(i,i+2);
     const top = group[0]||null, bottom = group[1]||null;
-    const topSizing = top ? checklistSizing(top.rows.length,'top') : null;
-    const bottomSizing = bottom ? checklistSizing(bottom.rows.length,'bottom') : null;
     printContent+=`<div class="checklist-page">
       <div class="checklist-row checklist-row-top">
-        <div class="checklist-cell">${top?renderChecklistBlock(top,false,topSizing):''}</div>
-        <div class="checklist-cell">${top?renderChecklistBlock(top,true,topSizing):''}</div>
+        <div class="checklist-cell checklist-fit-cell">${top?renderChecklistBlock(top,false,sizing):''}</div>
+        <div class="checklist-cell checklist-fit-cell">${top?renderChecklistBlock(top,true,sizing):''}</div>
       </div>
       ${cutlineHTML}
       <div class="checklist-row checklist-row-bottom">
-        <div class="checklist-cell">${bottom?renderChecklistBlock(bottom,false,bottomSizing):''}</div>
-        <div class="checklist-cell">${bottom?renderChecklistBlock(bottom,true,bottomSizing):''}</div>
+        <div class="checklist-cell checklist-fit-cell">${bottom?renderChecklistBlock(bottom,false,sizing):''}</div>
+        <div class="checklist-cell checklist-fit-cell">${bottom?renderChecklistBlock(bottom,true,sizing):''}</div>
       </div>
     </div>`;
   }
 
   largeBlocks.forEach(b=>{
-    const sizing = checklistSizing(b.rows.length,'full');
     printContent+=`<div class="checklist-page">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;height:270mm;">
-        <div style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;">${renderChecklistBlock(b,false,sizing)}</div>
-        <div style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;border-left:0.5px dashed #000;">${renderChecklistBlock(b,true,sizing)}</div>
+        <div class="checklist-fit-cell" style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;">${renderChecklistBlock(b,false,sizing)}</div>
+        <div class="checklist-fit-cell" style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;border-left:0.5px dashed #000;">${renderChecklistBlock(b,true,sizing)}</div>
       </div>
     </div>`;
   });
 
   return printContent;
+}
+
+// 印刷直前に実測して、枠からはみ出しているコマだけをその場で縮小する（環境・フォント差異があっても確実に収める）
+function fitChecklistPrintArea(){
+  document.querySelectorAll('.checklist-fit-cell').forEach(cell=>{
+    const inner = cell.querySelector('.checklist-pallet-inner');
+    if(!inner) return;
+    inner.style.zoom = 1;
+    const avail = cell.clientHeight - (parseFloat(getComputedStyle(cell).paddingTop)||0) - (parseFloat(getComputedStyle(cell).paddingBottom)||0);
+    const natural = inner.scrollHeight; // 縮小前（zoom:1）の自然な高さで判定する
+    if(natural <= avail || avail <= 0) return;
+    inner.style.zoom = Math.max(0.45, avail / natural); // 読めなくなるほどは縮めない（下限45%）
+  });
 }
 
 function openPrintChecklist(){
@@ -2279,6 +2280,7 @@ function executeChecklistPrint(targetPallets, targetBara){
   const blocks = buildChecklistBlocks(targetPallets, targetBara, date);
   if(blocks.length===0){ toast('印刷対象がありません'); return; }
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
+  fitChecklistPrintArea();
   closeBs();
   window.print();
   saveDeliveryRecord([],date,document.getElementById('shippingMemo').value.trim(),'checklist',
@@ -2299,6 +2301,7 @@ function reprintChecklistFromHistory(id){
   const blocks = buildChecklistBlocks(snap.pallets||[], snap.bara||[], date);
   if(blocks.length===0){ toast('この履歴には品目データがありません'); return; }
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
+  fitChecklistPrintArea();
   window.print();
 }
 
