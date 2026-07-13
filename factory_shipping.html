@@ -2067,60 +2067,115 @@ function buildSlipHTML(slip,date,memo){
 
 // ===== 印刷：チェックリスト =====
 // ブロックHTML生成（pallets/baraを引数化 → 再印刷でも使い回せるようにする）
+// パレット・バラのデータを{title,date,rows}の配列にする（実際のHTML化はrenderChecklistBlockで行う。
+// 行数に応じてレイアウトを変えられるようにするため、ここではまだHTML文字列にしない）
 function buildChecklistBlocks(pallets, bara, date){
   const validPallets = pallets.filter(p=>p.rows.some(r=>r.itemId&&r.qty));
   const validBara = bara.filter(r=>r.itemId&&r.qty);
 
-  const blocks = validPallets.map(p=>{
-    const validRows = p.rows.filter(r=>r.itemId&&r.qty);
-    return `<div class="checklist-pallet"><div class="checklist-pallet-inner">
-      <div class="checklist-title">📦 パレット　<span style="font-size:8pt;font-weight:normal;">${date}</span></div>
-      <table class="checklist-table"><thead><tr><th class="checklist-check">✓</th><th>品目名</th><th>カラー</th><th style="width:14mm;text-align:right;">数量</th></tr></thead><tbody>
-        ${validRows.map(r=>{const item=st.itemMaster.find(m=>m.id==r.itemId);if(!item)return'';return`<tr><td class="checklist-check">□</td><td>${esc(item.name)}</td><td>${esc(item.color||'')}</td><td style="text-align:right;">${r.qty}</td></tr>`;}).join('')}
-      </tbody></table>
-    </div></div>`;
-  });
+  const toRows = (list) => list.map(r=>{
+    const item = st.itemMaster.find(m=>m.id==r.itemId);
+    return item ? {name:item.name, color:item.color||'', qty:r.qty} : null;
+  }).filter(Boolean);
+
+  const blocks = validPallets.map(p=>({
+    title: '📦 パレット', date, rows: toRows(p.rows.filter(r=>r.itemId&&r.qty))
+  }));
 
   if(validBara.length>0){
-    blocks.push(`<div class="checklist-pallet"><div class="checklist-pallet-inner">
-      <div class="checklist-title">🚗 バラ　<span style="font-size:8pt;font-weight:normal;">${date}</span></div>
-      <table class="checklist-table"><thead><tr><th class="checklist-check">✓</th><th>品目名</th><th>カラー</th><th style="width:14mm;text-align:right;">数量</th></tr></thead><tbody>
-        ${validBara.map(r=>{const item=st.itemMaster.find(m=>m.id==r.itemId);if(!item)return'';return`<tr><td class="checklist-check">□</td><td>${esc(item.name)}</td><td>${esc(item.color||'')}</td><td style="text-align:right;">${r.qty}</td></tr>`;}).join('')}
-      </tbody></table>
-    </div></div>`);
+    blocks.push({ title: '🚗 バラ', date, rows: toRows(validBara) });
   }
   return blocks;
 }
 
-// 控え用に「タイトルに［控え］を付けた」コピーを作る
-function makeChecklistCopy(block){
+// 1コマ分（本体 or 控え）のHTMLを生成。sizingで行の高さ・フォントサイズを調整できる
+function renderChecklistBlock(block, isCopy, sizing){
   if(!block) return '';
-  return block.replace('<div class="checklist-title">', '<div class="checklist-title">［控え］');
+  const titlePrefix = isCopy ? '［控え］' : '';
+  return `<div class="checklist-pallet"><div class="checklist-pallet-inner">
+    <div class="checklist-title">${titlePrefix}${block.title}　<span style="font-size:8pt;font-weight:normal;">${block.date}</span></div>
+    <table class="checklist-table" style="font-size:${sizing.font}pt;">
+      <thead><tr>
+        <th class="checklist-check" style="font-size:${sizing.headerFont}pt;height:${sizing.rowH}px;line-height:${sizing.rowH}px;">✓</th>
+        <th style="font-size:${sizing.headerFont}pt;height:${sizing.rowH}px;line-height:${sizing.rowH}px;">品目名</th>
+        <th style="font-size:${sizing.headerFont}pt;height:${sizing.rowH}px;line-height:${sizing.rowH}px;">カラー</th>
+        <th style="width:14mm;text-align:right;font-size:${sizing.headerFont}pt;height:${sizing.rowH}px;line-height:${sizing.rowH}px;">数量</th>
+      </tr></thead>
+      <tbody>
+        ${block.rows.map(r=>{
+          const cellStyle = `height:${sizing.rowH}px;line-height:${sizing.rowH}px;`;
+          return `<tr>
+            <td class="checklist-check" style="${cellStyle}">□</td>
+            <td style="${cellStyle}">${esc(r.name)}</td>
+            <td style="${cellStyle}">${esc(r.color)}</td>
+            <td style="${cellStyle}text-align:right;">${r.qty}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div></div>`;
 }
 
-// blocks配列 → 1ページにつき2パレット分（各パレットの左＝本体・右＝控え）のページ割りHTMLを生成
+// 行数と配置枠（上段/下段/全ページ）から、収まるように行の高さ・フォントサイズを決める
+// 通常サイズで収まる行数までは既定サイズのまま。超える場合のみ縮小する（下限あり）
+function checklistSizing(rowCount, slot){
+  const DEFAULT = {rowH:22, font:12, headerFont:11};
+  const MIN     = {rowH:13, font:7,  headerFont:7};
+  const capacity = slot==='top' ? 17 : slot==='bottom' ? 14 : 32; // 'full'=1ページ丸ごと使う場合（余裕を持たせた基準値）
+  if(rowCount<=capacity || rowCount===0) return DEFAULT;
+  const ratio = capacity/rowCount;
+  return {
+    rowH:       Math.max(MIN.rowH, Math.round(DEFAULT.rowH*ratio)),
+    font:       Math.max(MIN.font, Math.round(DEFAULT.font*ratio*10)/10),
+    headerFont: Math.max(MIN.headerFont, Math.round(DEFAULT.headerFont*ratio*10)/10)
+  };
+}
+
+
+// blocks配列 → ページ割りHTMLを生成。
+// 通常の品目数のパレットは、これまでどおり2件ずつ1ページ（上段・下段）にまとめる。
+// 品目数が多いパレット（LARGE_THRESHOLDを超える）は、上下分割せず1ページを丸ごと使う。
 function paginateChecklistBlocks(blocks){
+  const LARGE_THRESHOLD = 17; // これを超える品目数のパレットは、半ページに詰め込まず専用の1ページを使う
   const cutlineHTML=`<div class="checklist-cutline">
     <div class="checklist-cutline-line"></div>
     <div class="checklist-cutline-label"></div>
     <div class="checklist-cutline-line"></div>
   </div>`;
+
+  const normalBlocks = blocks.filter(b=>b.rows.length<=LARGE_THRESHOLD);
+  const largeBlocks   = blocks.filter(b=>b.rows.length>LARGE_THRESHOLD);
+
   let printContent='';
-  for(let i=0; i<blocks.length; i+=2){
-    const group=blocks.slice(i,i+2);
-    while(group.length<2) group.push('');
+
+  for(let i=0; i<normalBlocks.length; i+=2){
+    const group=normalBlocks.slice(i,i+2);
+    const top = group[0]||null, bottom = group[1]||null;
+    const topSizing = top ? checklistSizing(top.rows.length,'top') : null;
+    const bottomSizing = bottom ? checklistSizing(bottom.rows.length,'bottom') : null;
     printContent+=`<div class="checklist-page">
       <div class="checklist-row checklist-row-top">
-        <div class="checklist-cell">${group[0]}</div>
-        <div class="checklist-cell">${makeChecklistCopy(group[0])}</div>
+        <div class="checklist-cell">${top?renderChecklistBlock(top,false,topSizing):''}</div>
+        <div class="checklist-cell">${top?renderChecklistBlock(top,true,topSizing):''}</div>
       </div>
       ${cutlineHTML}
       <div class="checklist-row checklist-row-bottom">
-        <div class="checklist-cell">${group[1]}</div>
-        <div class="checklist-cell">${makeChecklistCopy(group[1])}</div>
+        <div class="checklist-cell">${bottom?renderChecklistBlock(bottom,false,bottomSizing):''}</div>
+        <div class="checklist-cell">${bottom?renderChecklistBlock(bottom,true,bottomSizing):''}</div>
       </div>
     </div>`;
   }
+
+  largeBlocks.forEach(b=>{
+    const sizing = checklistSizing(b.rows.length,'full');
+    printContent+=`<div class="checklist-page">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;height:270mm;">
+        <div style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;">${renderChecklistBlock(b,false,sizing)}</div>
+        <div style="box-sizing:border-box;overflow:hidden;padding:4mm 5mm;border-left:0.5px dashed #000;">${renderChecklistBlock(b,true,sizing)}</div>
+      </div>
+    </div>`;
+  });
+
   return printContent;
 }
 
