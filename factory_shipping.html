@@ -2196,6 +2196,8 @@ function paginateChecklistBlocks(blocks){
 }
 
 // 印刷直前に実測して、枠からはみ出しているコマだけをその場で縮小する（環境・フォント差異があっても確実に収める）
+// ※印刷専用のレンダリングでは非標準のzoomプロパティが正しく反映されないことがあるため、
+// 　font-size/line-height/heightという標準プロパティを直接書き換える方式にしている
 function fitChecklistPrintArea(){
   const printArea = document.getElementById('printArea');
   // #printAreaは画面上は@media screenでdisplay:noneのため、そのままではclientHeight等が0になり測定できない。
@@ -2203,14 +2205,34 @@ function fitChecklistPrintArea(){
   const prevDisplay = printArea.style.display;
   printArea.style.display = 'block';
 
+  const DEFAULT = {rowH:22, font:12};
+  const MIN     = {rowH:11, font:6};
+
   document.querySelectorAll('.checklist-fit-cell').forEach(cell=>{
     const inner = cell.querySelector('.checklist-pallet-inner');
     if(!inner) return;
-    inner.style.zoom = 1;
+    const table = inner.querySelector('table.checklist-table');
+    const cells = inner.querySelectorAll('td,th');
+    if(!table) return;
+
+    // いったん既定サイズにリセットしてから測定する（再計算のため）
+    table.style.fontSize = DEFAULT.font+'pt';
+    cells.forEach(c=>{ c.style.height=DEFAULT.rowH+'px'; c.style.lineHeight=DEFAULT.rowH+'px'; });
+
     const avail = cell.clientHeight - (parseFloat(getComputedStyle(cell).paddingTop)||0) - (parseFloat(getComputedStyle(cell).paddingBottom)||0);
-    const natural = inner.scrollHeight; // 縮小前（zoom:1）の自然な高さで判定する
-    if(natural <= avail || avail <= 0) return;
-    inner.style.zoom = Math.max(0.45, avail / natural); // 読めなくなるほどは縮めない（下限45%）
+    const natural = inner.scrollHeight; // 既定サイズでの自然な高さ
+    if(natural <= avail || avail <= 0) return; // 収まっていれば何もしない
+
+    // タイトル部分は縮小しないので、その分を除いた「表部分」の縮小率を計算する
+    const titleEl = inner.querySelector('.checklist-title');
+    const titleH = titleEl ? titleEl.getBoundingClientRect().height : 0;
+    const availForTable = Math.max(20, avail - titleH);
+    const naturalForTable = Math.max(20, natural - titleH);
+    const ratio = Math.max(MIN.rowH/DEFAULT.rowH, availForTable/naturalForTable);
+    const newRowH = Math.max(MIN.rowH, Math.round(DEFAULT.rowH*ratio));
+    const newFont = Math.max(MIN.font, Math.round(DEFAULT.font*ratio*10)/10);
+    table.style.fontSize = newFont+'pt';
+    cells.forEach(c=>{ c.style.height=newRowH+'px'; c.style.lineHeight=newRowH+'px'; });
   });
 
   printArea.style.display = prevDisplay; // 画面上の表示は元に戻す（印刷は@media printのルールが別途効く）
