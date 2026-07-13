@@ -317,6 +317,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
     <button class="btn-primary" style="padding:10px 16px;font-size:15px;" onclick="addPallet()">＋ パレット追加</button>
+    <button class="btn-primary" style="padding:10px 16px;font-size:15px;background:#e67e22;" onclick="addBaraRow()">＋ バラ追加</button>
     <button class="btn-success" style="padding:10px 16px;font-size:15px;" onclick="openPrintDelivery()">🖨 納品書印刷</button>
     <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openPrintChecklist()">📋 チェックリスト印刷</button>
     <button class="btn-gray" style="padding:10px 16px;font-size:15px;" onclick="openChecklistSelectModalManual()">☑️ パレット選択印刷</button>
@@ -1613,16 +1614,47 @@ function onBaraMemoByItemId(itemId, val){
   row.memo = val;
   saveLocalState(); debounceWorkSave();
 }
+function onBaraDestByItemId(itemId, val){
+  const row = st.bara.find(r=>r.itemId==itemId);
+  if(!row) return;
+  row.dest = val.trim();
+  saveLocalState(); debounceWorkSave();
+}
 function renderBara(){
   const el = document.getElementById('baraBody');
   const cb = document.getElementById('baraPrintTargetCheckbox');
   if(cb) cb.checked = st.baraPrintTarget!==false;
-  const validBara = st.bara.filter(r=>r.itemId && r.qty);
-  if(validBara.length === 0){
-    el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">品目タイルから「バラに追加」してください</p>';
+
+  if(st.bara.length === 0){
+    el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">品目タイルから「バラに追加」、または「＋ バラ追加」で品目を選んでください</p>';
     return;
   }
-  el.innerHTML = validBara.map((r,i)=>{
+
+  // 品目マスターをグループごとにまとめて<select>の選択肢を作る（未選択行の品目選択用）
+  const itemOptionsHtml = (() => {
+    const byGroup = {};
+    st.itemMaster.forEach(m=>{
+      const g = m.group || '未分類';
+      (byGroup[g] = byGroup[g]||[]).push(m);
+    });
+    return Object.entries(byGroup).map(([g,items])=>
+      `<optgroup label="${esc(g)}">${items.map(m=>
+        `<option value="${m.id}">${esc(m.name)}${m.color?' ('+esc(m.color)+')':''}</option>`
+      ).join('')}</optgroup>`
+    ).join('');
+  })();
+
+  el.innerHTML = st.bara.map((r,i)=>{
+    if(!r.itemId){
+      // 品目未選択の行：プルダウンで選ぶ
+      return `<div class="palletRow">
+        <select style="grid-column:1/3;font-size:14px;padding:8px 4px;" onchange="onBaraItemSelect(${i},this.value)">
+          <option value="">品目を選択...</option>
+          ${itemOptionsHtml}
+        </select>
+        <button class="btn-danger btn-sm" onclick="removeBaraRow(${i})">✕</button>
+      </div>`;
+    }
     const item = st.itemMaster.find(m=>m.id==r.itemId);
     const label = item ? `${item.name}${item.color?' ('+item.color+')':''}` : '不明';
     return `<div class="palletRow">
@@ -1633,11 +1665,26 @@ function renderBara(){
         onchange="onBaraChange(${i},'qty',this.value)"
         oninput="onBaraChange(${i},'qty',this.value)">
       <button class="btn-danger btn-sm" onclick="removeBaraRowByItemId('${r.itemId}')">✕</button>
+      <input type="text" placeholder="積み先（例：助手席／パレット3に同梱　※チェックリストが分かれます）" value="${esc(r.dest||'')}"
+        style="grid-column:1/-1;font-size:12px;border:1px solid #ddd;border-radius:6px;padding:4px 6px;color:#0f3460;background:#eef5ff;"
+        onchange="onBaraDestByItemId('${r.itemId}',this.value)">
       <input type="text" placeholder="備考（補修分・直送分など）" value="${esc(r.memo||'')}"
         style="grid-column:1/-1;font-size:12px;border:1px solid #ddd;border-radius:6px;padding:4px 6px;color:#e67e22;"
         onchange="onBaraMemoByItemId('${r.itemId}',this.value)">
     </div>`;
   }).join('');
+}
+function onBaraItemSelect(idx, itemId){
+  if(!itemId) return;
+  // 既に同じ品目のバラ行があれば、新規行は作らずそちらに統合する（重複防止）
+  const dupIdx = st.bara.findIndex((r,i)=>i!==idx && r.itemId===itemId);
+  if(dupIdx>=0){
+    st.bara.splice(idx,1); // 今回選んだ空行は削除
+    toast('同じ品目が既にバラにあるため、数量欄をご確認ください');
+  } else {
+    st.bara[idx].itemId = itemId;
+  }
+  saveLocalState(); renderBara(); debounceWorkSave();
 }
 
 // ===== 使用材料計算 =====
@@ -2115,7 +2162,16 @@ function buildChecklistBlocks(pallets, bara, date){
   }));
 
   if(validBara.length>0){
-    blocks.push({ title: '🚗 バラ', date, rows: toRows(validBara) });
+    // 積み先タグ（dest）ごとにグループ化して、別々のチェックリストにする
+    // タグなし（通常のバラ）は「🚗 バラ」、タグありは「🚗 バラ（タグ名）」というタイトルにする
+    const groups = {};
+    validBara.forEach(r=>{
+      const key = (r.dest||'').trim();
+      (groups[key] = groups[key]||[]).push(r);
+    });
+    Object.entries(groups).forEach(([key, rows])=>{
+      blocks.push({ title: key ? `🚗 バラ（${esc(key)}）` : '🚗 バラ', date, rows: toRows(rows) });
+    });
   }
   return blocks;
 }
