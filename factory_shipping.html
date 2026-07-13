@@ -2218,6 +2218,15 @@ async function saveDeliveryRecord(slips,date,memo,type,snapshotOverride){
 }
 
 // ===== 出荷履歴表示 =====
+// レコードがチェックリストかどうかを判定。
+// GASスプレッドシートのtype列は後から追加したため、それ以前に保存された古いレコードはtypeが空欄のまま。
+// その場合はslips（伝票データ）の有無から推定する（チェックリストはslips:[]で保存されるため）。
+function isChecklistRecord(r){
+  if(r.type==='checklist') return true;
+  if(r.type==='delivery') return false;
+  return !(r.slips && r.slips.length>0);
+}
+
 function renderHistory(){
   const el=document.getElementById('historyList');
   const q=(document.getElementById('historySearch')?.value||'').trim().toLowerCase();
@@ -2228,7 +2237,7 @@ function renderHistory(){
   el.innerHTML=list.map((r,i)=>`
     <div class="historyItem">
       <div class="historyHead" onclick="toggleHistory(${i})">
-        <span>${r.shippingDate||'—'}　${r.type==='checklist'?'📋 チェックリスト':'🖨 納品書'}</span>
+        <span>${r.shippingDate||'—'}　${isChecklistRecord(r)?'📋 チェックリスト':'🖨 納品書'}</span>
         <span style="color:#666;font-size:11px;">▼</span>
       </div>
       <div class="historyBody" id="hb_${i}">
@@ -2242,10 +2251,10 @@ function renderHistory(){
             <div style="font-size:11px;color:#666;">${s.rows.map(row=>`${esc(row.name)} ${esc(row.color)} ×${row.qty}`).join('　')}</div>
           </div>
         `).join('')}
-        ${r.type==='checklist' ? checklistHistorySummary(r) : ''}
+        ${isChecklistRecord(r) ? checklistHistorySummary(r) : ''}
         <div style="display:flex;gap:6px;margin-top:8px;">
-          ${r.type!=='checklist'?`<button class="btn-warn btn-sm" onclick="openEditModal('${r.id}')">✏️ 編集・再印刷</button>`:''}
-          ${r.type==='checklist'?`<button class="btn-warn btn-sm" onclick="reprintChecklistFromHistory('${r.id}')">🖨 再印刷</button>`:''}
+          ${!isChecklistRecord(r)?`<button class="btn-warn btn-sm" onclick="openEditModal('${r.id}')">✏️ 編集・再印刷</button>`:''}
+          ${isChecklistRecord(r)?`<button class="btn-warn btn-sm" onclick="reprintChecklistFromHistory('${r.id}')">🖨 再印刷</button>`:''}
           <button class="btn-danger btn-sm" onclick="deleteRecord('${r.id}')">🗑 削除</button>
         </div>
       </div>
@@ -2279,7 +2288,7 @@ async function deleteRecord(id){
   const record = st.deliveryHistory.find(r=>r.id===id);
   if(!record) return;
   const date = record.shippingDate?.slice(0,10)||'';
-  const type = record.type==='checklist'?'チェックリスト':'納品書';
+  const type = isChecklistRecord(record)?'チェックリスト':'納品書';
   const slipNos = (record.slips||[]).map(s=>s.slipNo).join('・');
   const msg = '以下の履歴を削除しますか？\n\n種別: '+type+'\n出荷日: '+date+(slipNos?'\n伝票番号: '+slipNos:'')+'\n\nスプレッドシートからも削除されます。';
   if(!confirm(msg)) return;
@@ -2431,7 +2440,7 @@ function calcInvoice(){
   if(!month){ toast('対象月を選択してください'); return; }
   const target=month.slice(0,7);
   const records=st.deliveryHistory.filter(r=>
-    r.type!=='checklist' &&
+    !isChecklistRecord(r) &&
     r.shippingDate &&
     (r.shippingDate||'').slice(0,7)===target &&
     r.slips && r.slips.length>0
@@ -2495,7 +2504,7 @@ async function exportInvoiceExcel(){
   if(!month){ toast('対象月を選択してください'); return; }
   const target = month.slice(0,7);
   const records = st.deliveryHistory.filter(r=>
-    r.type!=='checklist' &&
+    !isChecklistRecord(r) &&
     r.shippingDate &&
     (r.shippingDate||'').slice(0,7)===target &&
     r.slips && r.slips.length>0
@@ -2707,7 +2716,7 @@ function getShippedQtyByGroupOnDate(group, dateStr){
   const keywords = (st.materialStock.settings||{}).repairKeywords || [];
   let total = 0;
   st.deliveryHistory.forEach(r=>{
-    if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
+    if(isChecklistRecord(r)) return; // チェックリストはslipsが無いため対象外
     if(r.shippingDate!==dateStr) return;
     const recordIsRepair = isRepairRow(r.memo, keywords);
     (r.slips||[]).forEach(s=>{
@@ -2737,7 +2746,7 @@ function getShippedQtyByGroup(group, afterDate, uptoDate){
   const keywords = (st.materialStock.settings||{}).repairKeywords || [];
   let total = 0;
   st.deliveryHistory.forEach(r=>{
-    if(r.type==='checklist') return; // チェックリストはslipsが無いため対象外
+    if(isChecklistRecord(r)) return; // チェックリストはslipsが無いため対象外
     if(!r.shippingDate || r.shippingDate <= afterDate) return;
     if(uptoDate && r.shippingDate > uptoDate) return; // 基準日より後の出荷は含めない
     const recordIsRepair = isRepairRow(r.memo, keywords); // 伝票全体（出荷メモ）での判定
