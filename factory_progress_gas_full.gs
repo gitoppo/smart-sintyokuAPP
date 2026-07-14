@@ -196,25 +196,34 @@ function saveAll_(p) {
 }
 
 // ============================================================
-// stock（ストックタブ：計画とは独立した品目別ストック数量）
+// stock（ストックタブ：端末別管理）
 // ============================================================
 function saveStock_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000); // 最大10秒待機
+    lock.waitLock(10000);
   } catch (e) {
     return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
   }
   try {
-    writeStockSheet_(ss, p.stock || {});
+    const current = readStockSheet_(ss);
+    const incoming = p.stock || {};
+    Object.keys(incoming).forEach(function(itemId) {
+      var entry = incoming[itemId] || {};
+      if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
+      Object.keys(entry).forEach(function(deviceDateKey) {
+        current[itemId][deviceDateKey] = entry[deviceDateKey];
+      });
+    });
+    writeStockSheet_(ss, current);
     return ok({});
   } finally {
     lock.releaseLock();
   }
 }
 
-// stockシート: itemId,qty
+// stockシート: itemId, entry(JSON)
 function readStockSheet_(ss) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) return {};
@@ -224,7 +233,8 @@ function readStockSheet_(ss) {
   for (var i = 1; i < data.length; i++) {
     var r = data[i];
     if (!r[0]) continue;
-    result[String(r[0])] = Number(r[1] || 0);
+    try { result[String(r[0])] = JSON.parse(String(r[1] || '{}')); }
+    catch(e) { result[String(r[0])] = {}; }
   }
   return result;
 }
@@ -233,9 +243,9 @@ function writeStockSheet_(ss, stock) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) sheet = ss.insertSheet('stock');
   sheet.clearContents();
-  var rows = [['itemId','qty']];
+  var rows = [['itemId', 'entry']];
   Object.keys(stock).forEach(function(itemId) {
-    rows.push([itemId, stock[itemId]]);
+    rows.push([itemId, JSON.stringify(stock[itemId] || {})]);
   });
   sheet.getRange(1, 1, rows.length, 2).setValues(rows);
 }
