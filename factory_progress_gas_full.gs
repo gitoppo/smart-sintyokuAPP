@@ -209,13 +209,32 @@ function saveStock_(p) {
   try {
     const current = readStockSheet_(ss);
     const incoming = p.stock || {};
-    Object.keys(incoming).forEach(function(itemId) {
-      var entry = incoming[itemId] || {};
-      if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
-      Object.keys(entry).forEach(function(deviceDateKey) {
-        current[itemId][deviceDateKey] = entry[deviceDateKey];
+    const isDelete = p.isDelete || false;
+
+    if (isDelete) {
+      // 削除操作：送信されてきたitemIdのキーをクラウドから削除
+      const deletedIds = p.deletedIds || [];
+      deletedIds.forEach(function(itemId) {
+        delete current[itemId];
       });
-    });
+      // 残りのitemIdはマージ
+      Object.keys(incoming).forEach(function(itemId) {
+        var entry = incoming[itemId] || {};
+        if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
+        Object.keys(entry).forEach(function(deviceDateKey) {
+          current[itemId][deviceDateKey] = entry[deviceDateKey];
+        });
+      });
+    } else {
+      // 通常の入力：マージ保存
+      Object.keys(incoming).forEach(function(itemId) {
+        var entry = incoming[itemId] || {};
+        if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
+        Object.keys(entry).forEach(function(deviceDateKey) {
+          current[itemId][deviceDateKey] = entry[deviceDateKey];
+        });
+      });
+    }
     writeStockSheet_(ss, current);
     return ok({});
   } finally {
