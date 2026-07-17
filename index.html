@@ -1356,12 +1356,11 @@ function renderStockSheetBody(g) {
 
 function askDeleteStockGroup(groupName) {
   if (!confirm(`「${groupName}」のストックを削除しますか？\n全端末分の入力数量も全て消えます。`)) return;
-  st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
-    if (st.stock) delete st.stock[it.id];
-  });
+  const deletedIds = st.itemMaster.filter(it => dispN(it) === groupName).map(it => it.id);
+  deletedIds.forEach(id => { if (st.stock) delete st.stock[id]; });
   closeStockSheet();
   saveLocal();
-  Cloud.saveStock(() => updateSyncBar('ok'), () => updateSyncBar('error'));
+  Cloud.saveStock(() => updateSyncBar('ok'), () => updateSyncBar('error'), deletedIds);
   renderStock();
   showToast(`🗑 「${groupName}」のストックを削除しました`);
 }
@@ -2600,8 +2599,13 @@ const Cloud = {
     if (!gasUrl) return;
     this.post({ action:'saveOperationLog', log }, null, null);
   },
-  saveStock(cb, errCb) {
-    this.post({ action:'saveStock', stock: st.stock }, cb, errCb);
+  saveStock(cb, errCb, deletedIds) {
+    const payload = { action:'saveStock', stock: st.stock };
+    if (deletedIds && deletedIds.length > 0) {
+      payload.isDelete = true;
+      payload.deletedIds = deletedIds;
+    }
+    this.post(payload, cb, errCb);
   }
 };
 
