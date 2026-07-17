@@ -1361,7 +1361,7 @@ function askDeleteStockGroup(groupName) {
   });
   closeStockSheet();
   saveLocal();
-  debouncedStockSave();
+  Cloud.saveStock(() => updateSyncBar('ok'), () => updateSyncBar('error'));
   renderStock();
   showToast(`🗑 「${groupName}」のストックを削除しました`);
 }
@@ -2690,6 +2690,12 @@ function applyCloudData(json, forceShiftAttend) {
   if (json.stock && typeof json.stock === 'object') {
     const dn = st.deviceName;
     const today = todayStr();
+    // 削除済みitemId（ローカルにキーがないもの）を記録
+    const localDeletedIds = new Set();
+    const localStockIds = new Set(Object.keys(st.stock || {}));
+    Object.keys(json.stock).forEach(itemId => {
+      if (!localStockIds.has(itemId)) localDeletedIds.add(itemId);
+    });
     // 自端末の今日分を退避
     const myLocal = {};
     Object.entries(st.stock || {}).forEach(([itemId, entry]) => {
@@ -2700,6 +2706,8 @@ function applyCloudData(json, forceShiftAttend) {
     });
     st.stock = {};
     Object.entries(json.stock).forEach(([itemId, entry]) => {
+      // ローカルで削除済みのitemIdはクラウドから復活させない
+      if (localDeletedIds.has(itemId)) return;
       st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
     });
     // 自端末の今日分を復元（ローカル優先）
