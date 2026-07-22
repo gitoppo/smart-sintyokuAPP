@@ -1344,6 +1344,7 @@ function renderStockSheetBody(g) {
           <div style="font-size:12px;color:#fbbf24">自分累計</div>
           <div style="font-size:26px;font-weight:700;color:#fbbf24">${r.myTotalVal}</div>
         </div>
+        <button onclick="deleteStockItem('${itemId}','${esc(r.colorName)}')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--r);background:transparent;color:var(--r);font-size:16px;cursor:pointer;flex-shrink:0">🗑</button>
       </div>
     </div>`;
   }).join('') + `
@@ -1352,6 +1353,24 @@ function renderStockSheetBody(g) {
         🗑 このストック品目を削除
       </button>
     </div>`;
+}
+
+function deleteStockItem(itemId, colorName) {
+  if (!confirm(`「${colorName}」を削除しますか？\n全端末分の入力数量が消えます。`)) return;
+  const deletedIds = [itemId];
+  if (st.stock) delete st.stock[itemId];
+  saveLocal();
+  Cloud.saveStock(() => updateSyncBar('ok'), () => updateSyncBar('error'), deletedIds);
+  // グループ内に残りの品目があればボトムシートを更新、なければ閉じる
+  const groups = buildStockGroups();
+  const g = groups.find(gg => gg.name === _stockOpenGroup);
+  if (g) {
+    renderStockSheetBody(g);
+  } else {
+    closeStockSheet();
+  }
+  renderStock();
+  showToast(`🗑 「${colorName}」を削除しました`);
 }
 
 function askDeleteStockGroup(groupName) {
