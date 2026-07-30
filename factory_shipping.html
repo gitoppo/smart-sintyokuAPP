@@ -1214,7 +1214,8 @@ function bsAddToBara(){
     const qty = parseInt(inp?.value)||0;
     if(qty <= 0) return;
     const memo_ = document.getElementById('bs-memo-'+m.id)?.value.trim()||'';
-    const existing = st.bara.find(r=>r.itemId==m.id);
+    // 既存行があれば数量を加算、なければ新規追加（ただし注文番号が付いている行には合算しない。空欄の行にのみ合算する）
+    const existing = st.bara.find(r=>r.itemId==m.id && !r.orderNo);
     if(existing){
       existing.qty = (parseInt(existing.qty)||0) + qty;
       if(memo_) existing.memo = memo_;
@@ -1581,18 +1582,6 @@ function removeBaraRow(idx){
   saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
   toast('行を削除しました', undoLastDelete);
 }
-function removeBaraRowByItemId(itemId){
-  const ri = st.bara.findIndex(r=>r.itemId==itemId);
-  if(ri === -1) return;
-  saveUndoSnapshot_();
-  if(st.bara.length <= 1){
-    st.bara[ri] = {itemId:'', qty:''};
-  } else {
-    st.bara.splice(ri, 1);
-  }
-  saveLocalState(); renderItemTiles(); renderBara(); renderMaterial(); saveShippingWork();
-  toast('バラを削除しました', undoLastDelete);
-}
 function clearAllBara(){
   const hasContent = st.bara.some(r=>r.itemId&&r.qty);
   if(!hasContent){ toast('バラは空です'); return; }
@@ -1607,28 +1596,16 @@ function onBaraChange(idx,field,val){
   st.bara[idx][field] = field==='qty'?(parseInt(val)||''):val;
   saveLocalState(); renderMaterial(); debounceWorkSave();
 }
-function onBaraMemoByItemId(itemId, val){
-  const row = st.bara.find(r=>r.itemId==itemId);
-  if(!row) return;
-  row.memo = val;
-  saveLocalState(); debounceWorkSave();
-}
-function onBaraDestByItemId(itemId, val){
-  const row = st.bara.find(r=>r.itemId==itemId);
-  if(!row) return;
-  row.dest = val.trim();
-  saveLocalState(); debounceWorkSave();
-}
 function renderBara(){
   const el = document.getElementById('baraBody');
   const cb = document.getElementById('baraPrintTargetCheckbox');
   if(cb) cb.checked = st.baraPrintTarget!==false;
-  const validBara = st.bara.filter(r=>r.itemId && r.qty);
-  if(validBara.length === 0){
+  if(st.bara.filter(r=>r.itemId && r.qty).length === 0){
     el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">品目タイルから「バラに追加」してください</p>';
     return;
   }
-  el.innerHTML = validBara.map((r,i)=>{
+  el.innerHTML = st.bara.map((r,i)=>{
+    if(!r.itemId || !r.qty) return ''; // 未入力行は表示しない（従来どおり）
     const item = st.itemMaster.find(m=>m.id==r.itemId);
     const label = item ? `${item.name}${item.color?' ('+item.color+')':''}` : '不明';
     return `<div class="palletRow">
@@ -1638,13 +1615,16 @@ function renderBara(){
         style="font-size:16px;padding:8px 4px;text-align:center;"
         onchange="onBaraChange(${i},'qty',this.value)"
         oninput="onBaraChange(${i},'qty',this.value)">
-      <button class="btn-danger btn-sm" onclick="removeBaraRowByItemId('${r.itemId}')">✕</button>
+      <button class="btn-danger btn-sm" onclick="removeBaraRow(${i})">✕</button>
+      <input type="text" placeholder="注文番号（違う番号は納品書で別行になります）" value="${esc(r.orderNo||'')}"
+        style="grid-column:1/-1;font-size:12px;border:1px solid #ddd;border-radius:6px;padding:4px 6px;color:#8e44ad;background:#f5eefc;"
+        onchange="onBaraChange(${i},'orderNo',this.value.trim())">
       <input type="text" placeholder="積み先（例：助手席／パレット3に同梱　※チェックリストが分かれます）" value="${esc(r.dest||'')}"
         style="grid-column:1/-1;font-size:12px;border:1px solid #ddd;border-radius:6px;padding:4px 6px;color:#0f3460;background:#eef5ff;"
-        onchange="onBaraDestByItemId('${r.itemId}',this.value)">
+        onchange="onBaraChange(${i},'dest',this.value.trim())">
       <input type="text" placeholder="備考（補修分・直送分など）" value="${esc(r.memo||'')}"
         style="grid-column:1/-1;font-size:12px;border:1px solid #ddd;border-radius:6px;padding:4px 6px;color:#e67e22;"
-        onchange="onBaraMemoByItemId('${r.itemId}',this.value)">
+        onchange="onBaraChange(${i},'memo',this.value)">
     </div>`;
   }).join('');
 }
@@ -1657,7 +1637,7 @@ function collectAllRows(){
     p.rows.forEach(r=>{
       if(r.itemId&&r.qty){
         const item = st.itemMaster.find(m=>m.id==r.itemId);
-        if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||''});
+        if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||'',orderNo:''});
       }
     });
   });
@@ -1665,7 +1645,7 @@ function collectAllRows(){
     st.bara.forEach(r=>{
       if(r.itemId&&r.qty){
         const item = st.itemMaster.find(m=>m.id==r.itemId);
-        if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||''});
+        if(item) rows.push({item,qty:parseInt(r.qty)||0,memo:r.memo||'',orderNo:r.orderNo||''});
       }
     });
   }
@@ -1683,8 +1663,8 @@ function groupRowsByGroup(allRows){
     const isEx = isRepairRow(r.memo, repairKeywords);
     const map = isEx ? gMapEx : gMap;
     if(!map[g]) map[g]={};
-    const k=r.item.id;
-    if(!map[g][k]) map[g][k]={item:r.item,qty:0,memo:r.memo||''};
+    const k=r.item.id+'|'+(r.orderNo||''); // 品目が同じでも注文番号が違えば別行にする
+    if(!map[g][k]) map[g][k]={item:r.item,qty:0,memo:r.memo||'',orderNo:r.orderNo||''};
     map[g][k].qty+=r.qty;
     if(r.memo) map[g][k].memo=r.memo;
   });
@@ -1997,7 +1977,8 @@ function printDelivery(grouped, existingRecord, startNo=1){
       qty:    r.qty,
       price:  r.item.price||0,
       amount: (r.item.price||0)*r.qty,
-      memo:   r.memo||''
+      memo:   r.memo||'',
+      orderNo: r.orderNo||''
     }));
     const subtotal=rows.reduce((s,r)=>s+r.amount,0);
     const tax=Math.floor(subtotal*TAX_RATE);
@@ -2082,7 +2063,7 @@ function buildSlipHTML(slip,date,memo){
             <td>${r.qty}</td>
             <td>${r.price?'￥'+r.price.toLocaleString():''}</td>
             <td>${r.amount?'￥'+r.amount.toLocaleString():''}</td>
-            <td style="font-size:8pt;"><span class="cell-fit">${esc(r.memo||'')}</span></td>
+            <td style="font-size:8pt;"><span class="cell-fit">${esc([r.orderNo?('注文:'+r.orderNo):'', r.memo||''].filter(Boolean).join(' '))}</span></td>
           </tr>`);
           // 8行固定：空行で埋める
           while(dataRows.length < 8) dataRows.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>');
@@ -2616,7 +2597,7 @@ function saveEditAndReprint(){
   // slipsをgrouped形式に変換して再印刷
   const grouped=record.slips.map(s=>({
     groupName:s.groupName,
-    rows:s.rows.map(r=>({item:{id:r.itemId,name:r.name,color:r.color,price:r.price},qty:r.qty,memo:r.memo||''}))
+    rows:s.rows.map(r=>({item:{id:r.itemId,name:r.name,color:r.color,price:r.price},qty:r.qty,memo:r.memo||'',orderNo:r.orderNo||''}))
   }));
   printDelivery(grouped, record);
   saveLocalState();
