@@ -2137,7 +2137,7 @@ function buildChecklistBlocks(pallets, bara, date){
   }).filter(Boolean);
 
   const blocks = validPallets.map(p=>({
-    title: '📦 パレット', date, rows: toRows(p.rows.filter(r=>r.itemId&&r.qty))
+    title: p.palletNo ? `📦 パレット${p.palletNo}` : '📦 パレット', date, rows: toRows(p.rows.filter(r=>r.itemId&&r.qty))
   }));
 
   if(validBara.length>0){
@@ -2326,6 +2326,9 @@ function submitChecklistSelect(){
 // 実際の印刷処理（対象パレット・バラを指定して印刷し、履歴保存・印刷済みフラグ付けまで行う）
 function executeChecklistPrint(targetPallets, targetBara){
   const date=document.getElementById('shippingDate').value||today();
+  // ①タブでの現在の表示番号（パレット3、パレット4…）をチェックリストにも印字するため、
+  // 印刷直前に本来の並び順から番号を割り当てる（履歴スナップショットにも残るようbuildChecklistBlocksより前に設定）
+  targetPallets.forEach(p=>{ p.palletNo = st.pallets.indexOf(p)+1; });
   const blocks = buildChecklistBlocks(targetPallets, targetBara, date);
   if(blocks.length===0){ toast('印刷対象がありません'); return; }
   document.getElementById('printArea').innerHTML = paginateChecklistBlocks(blocks);
