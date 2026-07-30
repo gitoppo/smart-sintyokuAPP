@@ -2063,7 +2063,7 @@ function buildSlipHTML(slip,date,memo){
             <td>${r.qty}</td>
             <td>${r.price?'￥'+r.price.toLocaleString():''}</td>
             <td>${r.amount?'￥'+r.amount.toLocaleString():''}</td>
-            <td style="font-size:8pt;"><span class="cell-fit">${esc([r.orderNo?('注番:'+r.orderNo):'', r.memo||''].filter(Boolean).join(' '))}</span></td>
+            <td style="font-size:8pt;"><span class="cell-fit">${esc([r.orderNo?('注番:'+r.orderNo):'', r.memo||''].filter(Boolean).join('＿'))}</span></td>
           </tr>`);
           // 8行固定：空行で埋める
           while(dataRows.length < 8) dataRows.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>');
