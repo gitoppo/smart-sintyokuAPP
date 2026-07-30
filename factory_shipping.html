@@ -619,6 +619,7 @@ let _editingRecordId = null; // 編集中の履歴ID
 window.addEventListener('DOMContentLoaded', ()=>{
   loadSettings();
   loadLocalState();
+  loadCheckValsFromLocal();
   setDefaultDate();
   setDefaultMonth();
   // 使用材料の集計日も今日に初期化
@@ -998,7 +999,16 @@ function itemOptions(selectedId){
 
 // ===== 品目タイル =====
 let _bsGroup = null; // 現在開いているグループ名
-let _checkVals = {}; // 箱数チェック入力値 {"パレットindex_itemId": 入力箱数}（同一品目が複数パレットに分かれる場合があるため、itemIdだけでなくパレットindexも含めてキーにする）
+let _checkVals = {}; // 箱数チェック入力値 {"パレットid_itemId": 入力箱数}（パレットの並び順ではなく固有idをキーにすることで、他端末による並び替え・増減の影響を受けない）
+function saveCheckValsToLocal(){
+  try{ localStorage.setItem('checkVals_v1', JSON.stringify(_checkVals)); }catch(e){}
+}
+function loadCheckValsFromLocal(){
+  try{
+    const s = localStorage.getItem('checkVals_v1');
+    if(s) _checkVals = JSON.parse(s) || {};
+  }catch(e){ _checkVals = {}; }
+}
 function checkKey_(palletId, itemId){ return palletId + '_' + itemId; }
 
 // ===== 誤削除の取り消し（Undo） =====
@@ -1015,7 +1025,7 @@ function undoLastDelete(){
   st.pallets = _undoSnapshot.pallets;
   st.bara    = _undoSnapshot.bara;
   _undoSnapshot = null;
-  _checkVals = {}; // パレット構成が変わるため箱数チェックは一旦リセット（要再チェック）
+  // 箱数チェックはp.id基準で保持されているので、そのまま自動的に復元される（明示的なリセット不要）
   saveLocalState(); renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
   saveShippingWork();
   toast('元に戻しました');
@@ -1244,7 +1254,8 @@ function removePallet(idx){
   if(st.pallets.length<=1){ toast('パレットは最低1つ必要です'); return; }
   saveUndoSnapshot_();
   st.pallets.splice(idx,1);
-  _checkVals = {}; // パレット削除でindexがずれるため、箱数チェックの入力値は一旦リセット（要再チェック）
+  // 箱数チェックの値はそのまま残す（パレットIDは二度と再利用されないため放置しても無害。
+  // Undoで元に戻した際にもチェック内容が一緒に復元される）
   saveLocalState(); renderItemTiles(); renderPallets(); renderMaterial(); saveShippingWork();
   toast('パレットを削除しました', undoLastDelete);
 }
@@ -1483,6 +1494,7 @@ function onCheckChange(palletId, itemId, val){
   markCheckActivity();
   const key = checkKey_(palletId, itemId);
   _checkVals[key] = parseInt(val)||0;
+  saveCheckValsToLocal();
   // 一致・不一致のスタイル更新
   const inp = document.getElementById('chk-'+key);
   const expected = document.getElementById('chk-exp-'+key);
@@ -1900,6 +1912,19 @@ async function openPrintDelivery(){
   if(!confirm(msg)) return;
 
   printDelivery(grouped, null, startNo);
+
+  // 印刷完了：今回印刷対象になったパレットの箱数チェックはリセットする
+  // （パレット自体は削除されず残り続ける仕様のため、同じパレットを次のロットで使い回した際に
+  // 　古いチェック内容が「チェック済み」として残ってしまうのを防ぐ）
+  st.pallets.forEach(p=>{
+    if(p.printTarget===false) return;
+    p.rows.forEach(r=>{
+      if(!r.itemId) return;
+      delete _checkVals[checkKey_(p.id, r.itemId)];
+    });
+  });
+  saveCheckValsToLocal();
+  renderPallets();
 }
 
 // ===== 手入力納品書（品目マスタ未登録のイレギュラー品用） =====
@@ -2436,7 +2461,8 @@ function restorePalletsFromHistory(id){
   if(!confirm('①タブの現在の内容を、この履歴（'+(record.shippingDate||'')+'）の内容で上書きします。\n現在①タブに入力中の内容は失われます。よろしいですか？')) return;
   st.pallets = JSON.parse(JSON.stringify(snap.pallets && snap.pallets.length>0 ? snap.pallets : [newPallet()]));
   st.bara    = JSON.parse(JSON.stringify(snap.bara||[]));
-  _checkVals = {}; // パレット構成が変わるため箱数チェックはリセット
+  _checkVals = {}; // 履歴からの復元は緊急時の復旧用のため、念のため箱数チェックはリセットする
+  saveCheckValsToLocal();
   saveLocalState(); renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
   saveShippingWork();
   toast('①タブに復元しました');
