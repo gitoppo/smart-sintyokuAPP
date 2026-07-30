@@ -905,11 +905,11 @@ function startPolling(){
   _pollTimer = setInterval(async()=>{
     if(!settings.gasUrl) return;
     try{
-      if(_localDirty) return; // 未保存の編集がある間はサーバーの内容で上書きしない（データ消失防止）
+      if(_localDirty || _checkActive) return; // 未保存の編集・箱数チェック中はサーバーの内容で上書きしない（データ消失防止）
       const shData = await gasGet('getShipping');
       if(!shData||!shData.workData) return;
       if(shData.workData.updatedAt === st.lastSyncedWorkAt) return; // 変更なし
-      if(_localDirty) return; // 通信中に編集が入った場合も念のため再チェック
+      if(_localDirty || _checkActive) return; // 通信中に編集・チェックが入った場合も念のため再チェック
       const focused = document.activeElement;
       if(focused&&(focused.tagName==='INPUT'||focused.tagName==='SELECT'||focused.tagName==='TEXTAREA')) return;
       if(shData.workData.pallets) st.pallets = shData.workData.pallets;
@@ -999,7 +999,7 @@ function itemOptions(selectedId){
 // ===== 品目タイル =====
 let _bsGroup = null; // 現在開いているグループ名
 let _checkVals = {}; // 箱数チェック入力値 {"パレットindex_itemId": 入力箱数}（同一品目が複数パレットに分かれる場合があるため、itemIdだけでなくパレットindexも含めてキーにする）
-function checkKey_(pi, itemId){ return pi + '_' + itemId; }
+function checkKey_(palletId, itemId){ return palletId + '_' + itemId; }
 
 // ===== 誤削除の取り消し（Undo） =====
 // 直前の削除操作1回分だけ元に戻せる（多段階のUndo履歴は持たない）
@@ -1461,17 +1461,27 @@ function calcCases(item, qty){
   return {cases, rem, label};
 }
 
-function onCheckAdj(pi, itemId, delta){
-  const key = checkKey_(pi, itemId);
+function onCheckAdj(palletId, itemId, delta){
+  const key = checkKey_(palletId, itemId);
   const inp = document.getElementById('chk-'+key);
   if(!inp) return;
   const v = Math.max(0,(parseInt(inp.value)||0)+delta);
   inp.value = v;
-  onCheckChange(pi, itemId, v);
+  onCheckChange(palletId, itemId, v);
 }
 
-function onCheckChange(pi, itemId, val){
-  const key = checkKey_(pi, itemId);
+// 箱数チェック入力中も一定時間はポーリングでの上書きを止める（入力値が消えるのを防止）
+let _checkActive = false;
+let _checkActivityTimer = null;
+function markCheckActivity(){
+  _checkActive = true;
+  clearTimeout(_checkActivityTimer);
+  _checkActivityTimer = setTimeout(()=>{ _checkActive = false; }, 8000); // 8秒操作がなければ解除
+}
+
+function onCheckChange(palletId, itemId, val){
+  markCheckActivity();
+  const key = checkKey_(palletId, itemId);
   _checkVals[key] = parseInt(val)||0;
   // 一致・不一致のスタイル更新
   const inp = document.getElementById('chk-'+key);
@@ -1505,8 +1515,9 @@ function renderPallets(){
             if(qty > doneQty) qtyClass='over';
           }
 
-          // 箱数チェック欄（パレットindex+itemIdで一意化。同じ品目が複数パレットに分かれても混同しない）
-          const checkVal = _checkVals[checkKey_(pi, r.itemId)]||0;
+          // 箱数チェック欄（パレットの安定id+itemIdで一意化。同じ品目が複数パレットに分かれても混同しない。
+          // パレットの並び順が他端末の操作で変わってもチェック内容が迷子にならないよう、配列indexではなくpalletの固有idを使う）
+          const checkVal = _checkVals[checkKey_(p.id, r.itemId)]||0;
           const checkMatch = checkVal>0 && checkVal===cases;
           const checkCls = checkVal===0?'':(checkMatch?'match':'nomatch');
 
@@ -1523,15 +1534,15 @@ function renderPallets(){
             <div style="text-align:center;">
               <div style="font-size:11px;color:#666;margin-bottom:2px;">箱数チェック</div>
               <div class="check-box">
-                <button class="check-adj" onclick="onCheckAdj(${pi},'${r.itemId}',-1)">－</button>
-                <input class="check-inp ${checkCls}" id="chk-${checkKey_(pi, r.itemId)}" type="number" min="0" value="${checkVal||''}"
-                  oninput="onCheckChange(${pi},'${r.itemId}',this.value)">
-                <button class="check-adj" onclick="onCheckAdj(${pi},'${r.itemId}',1)">＋</button>
+                <button class="check-adj" onclick="onCheckAdj(${p.id},'${r.itemId}',-1)">－</button>
+                <input class="check-inp ${checkCls}" id="chk-${checkKey_(p.id, r.itemId)}" type="number" min="0" value="${checkVal||''}"
+                  oninput="onCheckChange(${p.id},'${r.itemId}',this.value)">
+                <button class="check-adj" onclick="onCheckAdj(${p.id},'${r.itemId}',1)">＋</button>
               </div>
             </div>
             <div style="text-align:center;">
               <div style="font-size:11px;color:#666;margin-bottom:2px;">箱数</div>
-              <div class="pallet-row-case" id="chk-exp-${checkKey_(pi, r.itemId)}" data-cases="${cases}">${caseLabel_}</div>
+              <div class="pallet-row-case" id="chk-exp-${checkKey_(p.id, r.itemId)}" data-cases="${cases}">${caseLabel_}</div>
             </div>
             `:''}
             <div style="text-align:center;">
@@ -1843,7 +1854,7 @@ async function openPrintDelivery(){
       if(!item||!item.caseQty||item.caseQty<=0) return;
       const expectedCases = Math.floor((parseInt(r.qty)||0)/item.caseQty);
       if(expectedCases===0) return; // 端数のみ（1箱未満）はチェック不要
-      const checkVal = _checkVals[checkKey_(pi, r.itemId)]||0;
+      const checkVal = _checkVals[checkKey_(p.id, r.itemId)]||0;
       const label = `パレット${pi+1} ${item.name}${item.color?' ('+item.color+')':''}`;
       if(checkVal===0) unchecked.push(label+`: ${expectedCases}箱`);
       else if(checkVal!==expectedCases) nomatch.push(label+`: チェック${checkVal}箱 ≠ 登録${expectedCases}箱`);
