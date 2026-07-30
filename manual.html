@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>出荷管理アプリ 取扱説明書</title>
+<style>
+  :root{
+    --navy:#0f3460;
+    --navy-dark:#0a2647;
+    --orange:#e67e22;
+    --purple:#8e44ad;
+    --green:#1e8e5a;
+    --red:#e94560;
+    --bg:#f7f8fb;
+    --card:#ffffff;
+    --line:#e3e6ee;
+    --text:#232a3b;
+    --sub:#6b7386;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Hiragino Sans','Noto Sans JP','Yu Gothic',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.75;
+    -webkit-text-size-adjust:100%;
+  }
+  a{color:var(--navy);}
+
+  /* ===== ヘッダー ===== */
+  header{
+    background:linear-gradient(135deg,var(--navy-dark),var(--navy) 70%);
+    color:#fff;
+    padding:28px 20px 68px;
+    position:relative;
+    overflow:hidden;
+  }
+  header::after{
+    content:"";
+    position:absolute; right:-40px; bottom:-60px;
+    width:220px; height:220px; border-radius:50%;
+    background:rgba(230,126,34,0.18);
+  }
+  header .eyebrow{
+    font-size:12px; letter-spacing:0.14em; font-weight:700;
+    color:#ffb46b; text-transform:uppercase;
+  }
+  header h1{
+    margin:8px 0 6px; font-size:26px; font-weight:800; letter-spacing:0.02em;
+    position:relative; z-index:1;
+  }
+  header p{margin:0; font-size:13.5px; color:#c9d4e8; position:relative; z-index:1;}
+  header .meta{
+    margin-top:14px; display:flex; gap:14px; flex-wrap:wrap;
+    font-size:12px; color:#a9b8d6; position:relative; z-index:1;
+  }
+
+  /* ===== 検索 ===== */
+  #searchWrap{
+    max-width:900px; margin:-40px auto 0; padding:0 16px; position:relative; z-index:2;
+  }
+  #searchBox{
+    width:100%; padding:14px 16px; border-radius:14px; border:1px solid var(--line);
+    font-size:16px; box-shadow:0 10px 30px rgba(15,52,96,0.15); background:#fff;
+  }
+  #searchBox:focus{outline:2px solid var(--orange); outline-offset:1px;}
+  #searchHint{font-size:11px; color:var(--sub); margin:6px 4px 0;}
+
+  /* ===== レイアウト ===== */
+  #layout{
+    max-width:900px; margin:24px auto 80px; padding:0 16px;
+    display:block;
+  }
+
+  /* ===== 目次 ===== */
+  nav#toc{
+    background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:16px 18px; margin-bottom:24px;
+  }
+  nav#toc .tocTitle{font-weight:800; font-size:14px; margin-bottom:10px; color:var(--navy);}
+  nav#toc ol{margin:0; padding-left:0; list-style:none; counter-reset:toc;}
+  nav#toc > ol > li{counter-increment:toc; margin-bottom:4px;}
+  nav#toc a{
+    display:block; padding:8px 10px; border-radius:8px; text-decoration:none;
+    color:var(--text); font-size:14px; font-weight:600;
+  }
+  nav#toc > ol > li > a::before{
+    content: counter(toc) "　";
+    color:var(--orange); font-weight:800;
+  }
+  nav#toc a:hover{background:#f0f3fa;}
+  nav#toc ul{list-style:none; margin:2px 0 6px 26px; padding:0;}
+  nav#toc ul a{font-size:12.5px; font-weight:400; color:var(--sub); padding:4px 10px;}
+
+  /* ===== セクション ===== */
+  section.tabSection{
+    background:var(--card); border:1px solid var(--line); border-radius:18px;
+    margin-bottom:20px; overflow:hidden; scroll-margin-top:14px;
+  }
+  section.tabSection > .head{
+    padding:18px 22px; display:flex; align-items:center; gap:10px;
+    border-bottom:1px solid var(--line);
+  }
+  section.tabSection > .head .num{
+    width:34px; height:34px; border-radius:10px; background:var(--navy); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px;
+    flex:none;
+  }
+  section.tabSection > .head h2{margin:0; font-size:18px; font-weight:800;}
+  section.tabSection > .body{padding:6px 22px 20px;}
+
+  h3.feature{
+    font-size:15px; font-weight:800; margin:22px 0 6px; padding-top:14px;
+    border-top:1px dashed var(--line); color:var(--navy); scroll-margin-top:14px;
+  }
+  h3.feature:first-of-type{border-top:none; padding-top:0; margin-top:14px;}
+  h3.feature .btnTag{
+    display:inline-block; background:#eef3fb; color:var(--navy); border-radius:6px;
+    font-size:12px; padding:2px 8px; margin-right:6px; font-weight:700; vertical-align:middle;
+  }
+
+  p{margin:8px 0; font-size:14.5px;}
+  ol,ul{margin:8px 0; padding-left:22px; font-size:14.5px;}
+  li{margin-bottom:5px;}
+  strong{color:var(--navy-dark);}
+
+  .box{
+    border-radius:12px; padding:12px 14px; margin:12px 0; font-size:13.5px; line-height:1.65;
+  }
+  .box.tip{background:#eef7f0; border:1px solid #cbe9d3;}
+  .box.tip::before{content:"💡 コツ"; display:block; font-weight:800; color:var(--green); margin-bottom:4px; font-size:12.5px;}
+  .box.warn{background:#fff6ea; border:1px solid #f4dfb3;}
+  .box.warn::before{content:"⚠️ 注意"; display:block; font-weight:800; color:#a8720a; margin-bottom:4px; font-size:12.5px;}
+  .box.note{background:#f2f0fb; border:1px solid #dcd6f2;}
+  .box.note::before{content:"ℹ️ 補足"; display:block; font-weight:800; color:var(--purple); margin-bottom:4px; font-size:12.5px;}
+
+  code{
+    background:#eef1f7; border-radius:5px; padding:1px 6px; font-size:12.5px;
+    font-family:ui-monospace,'SFMono-Regular',Consolas,monospace; color:#42506b;
+  }
+  kbd{
+    background:#2d3548; color:#fff; border-radius:5px; padding:2px 7px; font-size:12px;
+    font-weight:600;
+  }
+
+  table.manualTable{width:100%; border-collapse:collapse; margin:10px 0; font-size:13.5px;}
+  table.manualTable th, table.manualTable td{
+    border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;
+  }
+  table.manualTable th{background:#f3f5fa; font-weight:800; color:var(--navy);}
+
+  .backTop{
+    display:inline-block; margin-top:10px; font-size:12px; color:var(--sub); text-decoration:none;
+  }
+
+  footer{
+    max-width:900px; margin:0 auto 60px; padding:0 16px; text-align:center; color:var(--sub); font-size:12px;
+  }
+
+  /* 検索ハイライト */
+  mark{background:#ffe3a8; color:inherit; border-radius:3px;}
+  .hidden{display:none !important;}
+
+  @media (max-width:600px){
+    header{padding:22px 14px 60px;}
+    header h1{font-size:21px;}
+    section.tabSection > .head{padding:14px 16px;}
+    section.tabSection > .body{padding:4px 16px 16px;}
+  }
+
+  @media print{
+    #searchWrap, nav#toc .tocTitle + ol > li > a[href]::after{display:none;}
+    header::after{display:none;}
+    a{color:inherit; text-decoration:none;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">SHIPPING APP MANUAL</div>
+  <h1>出荷管理アプリ 取扱説明書</h1>
+  <p>パレット積み込みから納品書・チェックリスト・請求書・材料在庫管理まで、①〜⑤タブの使い方をまとめています。</p>
+  <div class="meta">
+    <span>📅 最終更新：2026年7月30日</span>
+    <span>📱 タブレット・PC共通</span>
+  </div>
+</header>
+
+<div id="searchWrap">
+  <input type="text" id="searchBox" placeholder="🔍 知りたいことを入力（例：箱数チェック、白紙、注文番号）">
+  <div id="searchHint">見出し・本文から検索してハイライトします</div>
+</div>
+
+<div id="layout">
+
+<nav id="toc">
+  <div class="tocTitle">目次</div>
+  <ol>
+    <li><a href="#intro">はじめに</a></li>
+    <li><a href="#tab1">①パレット＆印刷</a>
+      <ul>
+        <li><a href="#f-shipinfo">出荷情報の入力</a></li>
+        <li><a href="#f-tiles">品目タイルから追加する</a></li>
+        <li><a href="#f-pallet">パレットの操作</a></li>
+        <li><a href="#f-bara">バラの操作（積み先・注文番号）</a></li>
+        <li><a href="#f-check">箱数チェック</a></li>
+        <li><a href="#f-undo">元に戻す（誤削除の取り消し）</a></li>
+        <li><a href="#f-slip">納品書印刷</a></li>
+        <li><a href="#f-checklist">チェックリスト印刷</a></li>
+        <li><a href="#f-matrix">チェックリスト入力（マトリクス）</a></li>
+        <li><a href="#f-manual">手入力で納品書作成</a></li>
+      </ul>
+    </li>
+    <li><a href="#tab2">②使用材料</a></li>
+    <li><a href="#tab3">③出荷履歴</a></li>
+    <li><a href="#tab4">④請求書</a></li>
+    <li><a href="#tab5">⑤材料在庫</a></li>
+    <li><a href="#tab6">⚙️設定</a></li>
+    <li><a href="#multi">複数端末で使うときの注意</a></li>
+    <li><a href="#trouble">よくあるトラブルと対処法</a></li>
+  </ol>
+</nav>
+
+<section class="tabSection" id="intro">
+  <div class="head"><div class="num">・</div><h2>はじめに</h2></div>
+  <div class="body">
+    <p>このアプリは、パレットへの積み込み〜納品書・チェックリストの発行〜使用材料や請求書の集計〜材料在庫の管理までを1つでまかなう出荷管理ツールです。ブラウザ（Chrome推奨）で動作し、専用のインストールは不要です。</p>
+    <div class="box tip">
+      タブレットで使う場合は、ホーム画面に追加（ブックマーク）しておくと、アプリのようにワンタップで開けます。
+    </div>
+    <div class="box note">
+      このアプリはGitHub Pagesという仕組みで公開されています。修正が反映されない場合は、ブラウザを一度ハードリロード（Ctrl+Shift+R、iPadは再読み込みを長押し）してみてください。
+    </div>
+  </div>
+</section>
+
+<section class="tabSection" id="tab1">
+  <div class="head"><div class="num">1</div><h2>①パレット＆印刷</h2></div>
+  <div class="body">
+    <p>出荷1回分の作業をすべて行うメインタブです。パレットへの積み込み・バラの管理・箱数チェック・各種印刷をここで行います。</p>
+
+    <h3 class="feature" id="f-shipinfo">出荷情報の入力</h3>
+    <table class="manualTable">
+      <tr><th>出荷日</th><td>納品予定日を入力します。伝票番号の採番や、⑤材料在庫タブの計算にも使われます。<br>納品書は前日に作成することが多いため、当日の日付のままにせず、実際の納品予定日に変更してから発行してください。</td></tr>
+      <tr><th>伝票番号プレフィックス</th><td>伝票番号の頭に付ける文字列（例：D-2026）。空欄でも発行できます。</td></tr>
+      <tr><th>出荷メモ</th><td>その回の出荷全体に関するメモ。納品書にも印字されます。</td></tr>
+    </table>
+
+    <h3 class="feature" id="f-tiles">品目タイルから追加する</h3>
+    <p>「品目を選択してパレットに追加」の一覧から品目タイルをタップすると、数量入力とパレット番号（またはバラ）を選ぶ画面が開きます。品目マスターに登録済みのすべての品目がここに並びます。</p>
+    <ul>
+      <li>タイル一覧の並び順や表示は「✏️ 編集」から調整できます。</li>
+      <li>すでに同じパレット・同じ品目に登録がある場合は、数量が自動的に加算されます。</li>
+    </ul>
+
+    <h3 class="feature" id="f-pallet">パレットの操作</h3>
+    <p><span class="btnTag">＋ パレット追加</span>で新しいパレットの枠を追加できます。パレットには番号（パレット1、パレット2…）が自動で振られますが、これは<strong>並び順（配列の位置）</strong>によるもので、途中のパレットを削除すると、それより後ろの番号は繰り上がります。</p>
+    <ul>
+      <li><strong>🖨 印刷対象</strong>のチェックを外すと、そのパレットは納品書・箱数チェックの対象から一時的に除外されます（積み増し中のパレットなどに使用）。</li>
+      <li>パレット右上の「✕ 削除」でパレットごと削除できます。</li>
+      <li>行ごとの備考欄（補修分・直送分など）に材料在庫の「補修キーワード」（後述）を含む文言を入れると、その行は納品書で別伝票に分かれ、⑤材料在庫の在庫数からも除外されます。</li>
+    </ul>
+    <div class="box warn">
+      パレットは出荷が終わっても自動では消えません。手動で削除しない限り残り続けます。1回の出荷分がすべて揃うまで削除しない、という運用にしておくと、パレット番号が途中でズレる心配がありません。
+    </div>
+
+    <h3 class="feature" id="f-bara">バラの操作（積み先・注文番号）</h3>
+    <p>助手席に載せる分や、パレットに同梱しない端数などは「🚗 バラ」にまとめます。品目タイルから「バラに追加」を選ぶと登録できます。</p>
+    <table class="manualTable">
+      <tr><th>積み先</th><td>「助手席」「パレット3に同梱」など、実際にどこへ積むかを入力します。<strong>タグを入力すると、チェックリスト印刷時にタグごとに別々のチェックリストへ自動で分かれます。</strong>空欄のままなら、これまでどおり1枚のチェックリストにまとまります。</td></tr>
+      <tr><th>注文番号</th><td>同じ品目・カラーでも、注文（ロット）が違う場合に入力します。<strong>注文番号が異なる行は、納品書で自動的に別の行として分かれます</strong>（数量が合算されません）。納品書の備考欄には「注番:入力した番号」と印字されます。</td></tr>
+      <tr><th>備考</th><td>補修分・直送分など。材料在庫の補修キーワードと連動します。</td></tr>
+    </table>
+    <div class="box tip">
+      積み先タグと注文番号は、同時に使えます。同じ品目でも「積み先」でチェックリストを分け、「注文番号」で納品書の行を分ける、という組み合わせが可能です。
+    </div>
+    <div class="box note">
+      「🖨 印刷対象」のチェックを外すと、バラ全体を今回の納品書・チェックリストから除外できます（バラの見出し右にあるチェックボックス）。
+    </div>
+
+    <h3 class="feature" id="f-check">箱数チェック</h3>
+    <p>1ケースあたりの数量（品目マスターの設定）をもとに、パレットの行ごとに「何箱積んだか」をチェックする欄です。実際に積んだ箱数を入力すると、計算上の想定箱数と一致していれば緑色、違っていれば赤色で表示されます。</p>
+    <ul>
+      <li>数量が1箱に満たない端数だけの行は、チェック不要です。</li>
+      <li>チェック内容は<strong>その端末のブラウザだけに保存</strong>されます。他の端末には表示されません（サーバーには送られません）。</li>
+      <li>チェックした内容は、ページをリロードしても消えません。ただし、<strong>納品書の発行が完了すると、その回に発行したパレットの分は自動的にリセット</strong>されます（同じパレットを使い回した際に、古いチェックが残らないようにするためです）。</li>
+      <li>チェックの入力中（8秒以内）は、他端末の自動更新によって画面が上書きされないよう保護されています。ただし<strong>チェックしてから時間を空けすぎず、できるだけ早めに印刷まで進める</strong>のが安全です。</li>
+    </ul>
+    <div class="box warn">
+      箱数チェックが未入力・不一致のままだと、納品書印刷の際に一覧表示され、発行がブロックされます。すべて一致させてから印刷してください。
+    </div>
+
+    <h3 class="feature" id="f-undo">元に戻す（誤削除の取り消し）</h3>
+    <p>パレット・パレット内の品目・バラの行を削除すると、画面下に「元に戻す」ボタン付きの通知が8秒間表示されます。押すと直前の削除1回分だけ元に戻せます（2手以上前には戻せません）。</p>
+
+    <h3 class="feature" id="f-slip">納品書印刷</h3>
+    <p><span class="btnTag">🖨 納品書印刷</span>で、パレット・バラの内容から納品書を発行します。</p>
+    <ul>
+      <li>品目のグループ（品目マスターの「グループ」設定）ごとに、伝票が1枚ずつ自動で分かれます。</li>
+      <li>同じ品目・カラーは基本的に1行にまとまりますが、備考欄に補修キーワードが入っている行、または注文番号が異なる行は、自動的に別の行・別の伝票に分かれます。</li>
+      <li>発行前に、箱数チェックの不一致・未チェックがあればブロックされます。計画残数より少ない数量の場合は警告が出ますが、発行は可能です。</li>
+      <li>発行すると③出荷履歴に記録され、伝票番号が自動採番されます。</li>
+    </ul>
+
+    <h3 class="feature" id="f-checklist">チェックリスト印刷</h3>
+    <table class="manualTable">
+      <tr><th><span class="btnTag">📋 チェックリスト印刷</span></th><td>未印刷のパレット・バラだけを対象に、その場でチェックリストを印刷します（重複印刷防止）。すべて印刷済みの場合は、次の「パレット選択印刷」と同じ選択画面が開きます。</td></tr>
+      <tr><th><span class="btnTag">☑️ パレット選択印刷</span></th><td>今あるパレット・バラの中から、印刷したいものだけをチェックで選んで印刷できます。印刷済みのものも選び直して再印刷できます。</td></tr>
+    </table>
+    <ul>
+      <li>1パレット＝チェックリスト1ページ（左：本体／右：控え）で印刷されます。品目数が多い場合は、印刷直前に自動で文字サイズが調整され、見切れないようになっています。</li>
+      <li>バラは「積み先」タグごとに別々のチェックリストに分かれます。</li>
+    </ul>
+
+    <h3 class="feature" id="f-matrix">チェックリスト入力（マトリクス）</h3>
+    <p><span class="btnTag">🧮 チェックリスト入力</span>は、複数の品目・カラーを表形式でタップしながら一括登録できる画面です。タップするたびに1箱分がパレットへ積み上がっていきます。1箱に満たない端数は、品目タイルから「バラに追加」してください。</p>
+
+    <h3 class="feature" id="f-manual">手入力で納品書作成</h3>
+    <p><span class="btnTag">✏️ 手入力で納品書作成</span>は、品目マスターに登録されていないイレギュラーな品物用に、品名・カラー・数量・単価を直接入力して納品書を作成できる機能です。</p>
+  </div>
+</section>
+
+<section class="tabSection" id="tab2">
+  <div class="head"><div class="num">2</div><h2>②使用材料</h2></div>
+  <div class="body">
+    <p>指定した日の出荷履歴から、原反（幅1220mm）ベースでの材料使用量を自動集計します。「集計日」を選んで「📊 集計」を押すと、その日に発行された納品書をもとに計算されます。</p>
+  </div>
+</section>
+
+<section class="tabSection" id="tab3">
+  <div class="head"><div class="num">3</div><h2>③出荷履歴</h2></div>
+  <div class="body">
+    <p>これまでに発行した納品書・チェックリストの履歴です。伝票番号や日付で検索できます。</p>
+    <table class="manualTable">
+      <tr><th>✏️ 編集・再印刷</th><td>納品書の単価・カラーなどを修正して再発行できます（価格改定前の伝票の訂正など）。</td></tr>
+      <tr><th>🖨 再印刷</th><td>チェックリストを、発行当時の内容のまま再印刷します。</td></tr>
+      <tr><th>↩️ ①タブへ復元</th><td>そのチェックリストを発行した時点のパレット内容を、①タブへそのまま復元します。誤って①タブの内容が消えてしまった場合の緊急復旧に使えます（現在①タブに入力中の内容は上書きされるので注意してください）。</td></tr>
+      <tr><th>🗑 削除</th><td>履歴とスプレッドシート上のデータの両方から削除します。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="tabSection" id="tab4">
+  <div class="head"><div class="num">4</div><h2>④請求書</h2></div>
+  <div class="body">
+    <p>対象月を選んで「📊 集計」を押すと、その月に発行したすべての納品書（チェックリストは対象外）を、品目名＋カラーごとに合算した月次請求書を作成します。</p>
+    <ul>
+      <li><strong>🖨 印刷</strong>：請求書として印刷できます。</li>
+      <li><strong>📥 Excel出力（明細付き）</strong>：請求書と、伝票単位の明細をExcelファイルとして出力します。</li>
+    </ul>
+    <div class="box note">
+      注文番号や積み先タグが違っていても、品目名＋カラーが同じであれば、請求書上ではまとめて合算されます（金額の集計には影響しません）。
+    </div>
+  </div>
+</section>
+
+<section class="tabSection" id="tab5">
+  <div class="head"><div class="num">5</div><h2>⑤材料在庫</h2></div>
+  <div class="body">
+    <p>客先支給の板金加工品などの在庫を、「起点在庫＋入荷－返品－出荷」の計算式で自動管理します。</p>
+
+    <h3 class="feature">初期設定</h3>
+    <p><span class="btnTag">⚙️ 対象グループ・起点在庫の設定</span>から、在庫管理したい品目グループにチェックを入れ、起点日とその時点の在庫数を入力します。以降は、起点日より後の入荷・返品（この画面での登録分）と出荷（出荷履歴）が自動で加減算されます。</p>
+    <div class="box note">
+      「補修分として除外する備考キーワード」に登録した文言（カンマ区切り、例：補修,補修分,貼り直し分）が備考欄に入っている出荷行は、在庫の減算対象から除外されます。
+    </div>
+
+    <h3 class="feature">入荷・返品の登録</h3>
+    <p>入荷・返品の都度、日付・グループ・数量を登録します。登録した内容は在庫数に自動で反映されます。</p>
+
+    <h3 class="feature">在庫表の印刷</h3>
+    <p>「在庫表の出荷日」欄（①タブの出荷日欄をタブを開いた時点でコピーした、独立した入力欄）を基準に、「前日」「出荷日」「出荷数（納品分）」「返品数」を並べて印刷できます。前日と出荷日の在庫数を見比べることで、入荷・返品の入力漏れがないかチェックできます。</p>
+    <ul>
+      <li>この日付欄は①タブとは連動しません。⑤タブを開くたびに①タブの値がコピーされるだけで、変更しても保存されません。</li>
+      <li>印刷は「本表」「控え」の2枚1組、A4を上下2分割したレイアウトです。下部には手書きメモ用の空欄が1行あります。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="tabSection" id="tab6">
+  <div class="head"><div class="num">⚙</div><h2>設定</h2></div>
+  <div class="body">
+    <table class="manualTable">
+      <tr><th>自社情報</th><td>会社名・住所・電話番号・インボイス登録番号・振込先。納品書・請求書に印字されます。</td></tr>
+      <tr><th>得意先情報</th><td>得意先名・郵便番号・住所。郵便番号と住所は請求書（Excel出力）のみに使用し、納品書には印字されません。</td></tr>
+      <tr><th>端末・接続</th><td>端末名とGAS URL（データ保存先）の設定。「🔗 接続確認」でつながっているか確認、「🔄 データ再読み込み」で最新データを手動で取得できます。</td></tr>
+      <tr><th>サーバーメンテナンス</th><td>スプレッドシートが重くなってきた場合に、古い生産計画・作業ログをアーカイブシートへ退避します（削除ではなく移動）。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="tabSection" id="multi">
+  <div class="head"><div class="num">👥</div><h2>複数端末で使うときの注意</h2></div>
+  <div class="body">
+    <p>①タブのパレット・バラの内容は、全端末で共有される仕組みです。30秒ごとに自動で最新の内容へ更新されます。</p>
+    <ul>
+      <li><strong>複数端末で同時に①タブを編集しない</strong>でください。最後に保存した端末の内容で上書きされる仕組みのため、同時編集すると片方の変更が消えることがあります。</li>
+      <li>①タブを触る前は、念のため一度リロードしてから作業を始めると安全です。</li>
+      <li>編集中（未保存の間）や箱数チェックの入力中は、他端末の自動更新による上書きを一時的に止める保護が入っていますが、過信せず、こまめに保存・印刷を済ませる運用を心がけてください。</li>
+      <li><strong>箱数チェックの内容は端末ごとのローカル保存で、他端末とは共有されません。</strong>チェックと印刷は同じ端末で行ってください。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="tabSection" id="trouble">
+  <div class="head"><div class="num">🛠</div><h2>よくあるトラブルと対処法</h2></div>
+  <div class="body">
+    <h3 class="feature">①タブのパレット内容が白紙になった</h3>
+    <ol>
+      <li>他の端末で、まだその画面を開いたままになっていないか確認してください。残っていれば、そちらでリロードせず何か操作（保存が発生する操作）をすると復旧できることがあります。</li>
+      <li>③出荷履歴で、直近に発行したチェックリストがあれば「↩️ ①タブへ復元」で内容を復元できます。</li>
+    </ol>
+
+    <h3 class="feature">箱数チェックの数字が消えた</h3>
+    <p>チェックしてから時間を空けすぎると、他端末の更新によって上書きされる可能性があります。チェック後はできるだけ早く印刷まで進めてください。またリロードすると必ず消えます（端末ごとのその場限りの保存のため）。</p>
+
+    <h3 class="feature">印刷したら文字や表が見切れる</h3>
+    <p>チェックリスト・在庫表は、印刷直前に自動でサイズ調整される仕組みになっています。それでも見切れる場合は、印刷ダイアログの「詳細設定」で余白・拡大縮小の設定が「デフォルト」になっているか確認してください。</p>
+
+    <h3 class="feature">修正したはずなのに反映されない</h3>
+    <ol>
+      <li>GitHubへのpush・デプロイが完了しているか確認してください（デプロイのStatusが緑チェックになるまで数分かかることがあります）。</li>
+      <li>ブラウザのハードリロード（Ctrl+Shift+R、iPadは再読み込みを長押し）を試してください。</li>
+    </ol>
+
+    <h3 class="feature">出荷履歴の中身が空欄・「白紙の納品書」に見える</h3>
+    <p>古いデータの一部で、内部の種別情報が空欄になっていることが原因の場合があります。改善されない場合はご相談ください。</p>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  出荷管理アプリ 取扱説明書 ／ このページはアプリと同じ場所（GitHub Pages）に置いて、ブックマークしておくと便利です。
+</footer>
+
+<script>
+(function(){
+  var box = document.getElementById('searchBox');
+  var sections = document.querySelectorAll('#layout section.tabSection');
+  var originalHTML = {};
+  sections.forEach(function(s,i){ originalHTML[i] = s.innerHTML; });
+
+  function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+
+  box.addEventListener('input', function(){
+    var q = box.value.trim();
+    sections.forEach(function(s,i){
+      s.innerHTML = originalHTML[i];
+    });
+    if(!q){ return; }
+    var re = new RegExp('('+escapeRegExp(q)+')','gi');
+    sections.forEach(function(s){
+      var walker = document.createTreeWalker(s, NodeFilter.SHOW_TEXT, null);
+      var matched = false;
+      var nodes = [];
+      while(walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(function(node){
+        if(re.test(node.nodeValue)){
+          matched = true;
+          var span = document.createElement('span');
+          span.innerHTML = node.nodeValue.replace(re,'<mark>$1</mark>');
+          node.parentNode.replaceChild(span, node);
+        }
+      });
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
