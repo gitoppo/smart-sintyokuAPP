@@ -353,9 +353,12 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
   <div class="f12 text-muted" style="padding:8px 6px 12px;line-height:1.6">
     📦 本番計画が確定する前の先行生産分を記録するタブです。計画とは連動しません。
   </div>
-  <div style="margin-bottom:10px">
-    <button class="btn-sm" onclick="openStockPicker()" style="width:100%;padding:12px;font-size:14px;font-weight:700;border-color:#d97706;color:#fbbf24;background:#2a1a05">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <button class="btn-sm" onclick="openStockPicker()" style="flex:1;padding:12px;font-size:14px;font-weight:700;border-color:#d97706;color:#fbbf24;background:#2a1a05">
       ＋ ストック品目を追加
+    </button>
+    <button class="btn-sm" onclick="transferStockToProgress()" id="stock-transfer-btn" style="flex:1;padding:12px;font-size:14px;font-weight:700;border-color:#0891b2;color:#67e8f9;background:#0c2a35">
+      📋 ②個人タブへ転記
     </button>
   </div>
   <!-- タイルグリッド -->
@@ -1429,6 +1432,169 @@ let _stockSaveTimer = null;
 function debouncedStockSave() {
   clearTimeout(_stockSaveTimer);
   _stockSaveTimer = setTimeout(() => { Cloud.saveStock(null, null); }, 600);
+}
+
+// ============================================================
+// ストック→②個人タブへの転記
+// ============================================================
+function transferStockToProgress() {
+  if (!st.stock || Object.keys(st.stock).length === 0) {
+    alert('ストックデータがありません。');
+    return;
+  }
+  if (!st.plans || st.plans.length === 0) {
+    alert('計画データがありません。本番CSVをインポートしてから転記してください。');
+    return;
+  }
+
+  const today = todayStr();
+
+  // ストックの全品目を品目名＋カラーで整理
+  const transferList = [];  // 転記できる品目
+  const skipList = [];      // 計画にない品目（スキップ）
+  const deletedItemIds = []; // 転記後に削除するitemId
+
+  // 品目マスターのitemIdごとに処理
+  Object.entries(st.stock).forEach(([itemId, entry]) => {
+    if (!entry || typeof entry !== 'object') return;
+    const item = st.itemMaster.find(it => it.id === itemId);
+    if (!item) return;
+
+    // 全端末の累計を計算
+    const totalVal = calcPostTotal(entry);
+    if (totalVal === 0) return; // 0のものはスキップ
+
+    const groupName = dispN(item);
+    const colorName = dispC(item);
+
+    // 対応する計画を検索（品目名＋カラーで照合）
+    const plan = st.plans.find(p => p.itemId === item.id);
+    if (plan) {
+      // 転記リストに追加
+      const existing = transferList.find(t => t.planId === plan.id);
+      if (existing) {
+        existing.totalVal += totalVal;
+        existing.itemIds.push(itemId);
+      } else {
+        transferList.push({
+          planId: plan.id,
+          groupName,
+          colorName,
+          totalVal,
+          itemIds: [itemId],
+          entry
+        });
+      }
+      deletedItemIds.push(itemId);
+    } else {
+      skipList.push({ groupName, colorName, totalVal });
+    }
+  });
+
+  if (transferList.length === 0 && skipList.length === 0) {
+    alert('転記できるデータがありません。');
+    return;
+  }
+
+  // 確認ダイアログ
+  let msg = '【転記する品目】\n';
+  if (transferList.length > 0) {
+    transferList.forEach(t => {
+      msg += `・${t.groupName} ${t.colorName}：${t.totalVal}個\n`;
+    });
+  } else {
+    msg += '（なし）\n';
+  }
+  msg += '\n【計画なし・ストックに残る品目】\n';
+  if (skipList.length > 0) {
+    skipList.forEach(s => {
+      msg += `・${s.groupName} ${s.colorName}：${s.totalVal}個\n`;
+    });
+  } else {
+    msg += '（なし）\n';
+  }
+  msg += '\n転記済み品目はストックから削除されます。実行しますか？';
+
+  if (!confirm(msg)) return;
+
+  // レポート印刷（転記前にデータを保存）
+  printStockTransferReport(transferList, skipList, today);
+
+  // 転記実行
+  transferList.forEach(t => {
+    if (!st.progress[t.planId]) st.progress[t.planId] = { preDone: 0, postDone: {} };
+    // 全端末のデータをそのまま転記（端末名_日付キーを今日の日付に変換）
+    Object.entries(t.entry).forEach(([key, val]) => {
+      const m = key.match(/^(.+)_\d{4}-\d{2}-\d{2}$/);
+      const deviceName = m ? m[1] : key;
+      const newKey = deviceName + '_' + today;
+      const cur = toNum(st.progress[t.planId].postDone[newKey]);
+      st.progress[t.planId].postDone[newKey] = cur + toNum(val);
+    });
+  });
+
+  // 転記済み品目をストックから削除
+  deletedItemIds.forEach(itemId => {
+    if (st.stock) delete st.stock[itemId];
+  });
+
+  saveLocal();
+  Cloud.savePlansProgress(() => updateSyncBar('ok'), () => updateSyncBar('error'));
+  Cloud.saveStock(() => {}, () => {}, deletedItemIds.length > 0 ? deletedItemIds : null);
+  renderAll();
+  showToast(`📋 ${transferList.length}件を②個人タブへ転記しました`);
+}
+
+function printStockTransferReport(transferList, skipList, today) {
+  const now = new Date().toLocaleString('ja-JP');
+  const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ストック転記レポート</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; color: #111; }
+  h1 { font-size: 18px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { font-size: 15px; margin-top: 24px; margin-bottom: 8px; color: #0369a1; }
+  h2.skip { color: #b45309; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th { background: #1e3a5f; color: white; padding: 8px; text-align: left; }
+  td { padding: 8px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) { background: #f5f5f5; }
+  .meta { font-size: 13px; color: #555; margin-bottom: 16px; }
+  .none { color: #999; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>📋 ストック転記レポート</h1>
+<div class="meta">実行日時：${now} ／ 転記日付：${today}</div>
+
+<h2>転記済み品目（②個人タブへ反映）</h2>
+${transferList.length > 0 ? `
+<table>
+  <tr><th>品目名</th><th>カラー</th><th>全端末合計</th></tr>
+  ${transferList.map(t => `<tr><td>${t.groupName}</td><td>${t.colorName}</td><td>${t.totalVal}個</td></tr>`).join('')}
+</table>` : '<p class="none">（なし）</p>'}
+
+<h2 class="skip">ストック残（計画なし・転記されなかった品目）</h2>
+${skipList.length > 0 ? `
+<table>
+  <tr><th>品目名</th><th>カラー</th><th>全端末合計</th></tr>
+  ${skipList.map(s => `<tr><td>${s.groupName}</td><td>${s.colorName}</td><td>${s.totalVal}個</td></tr>`).join('')}
+</table>` : '<p class="none">（なし）</p>'}
+
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 500);
+  } else {
+    alert('ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。');
+  }
 }
 
 // 「＋ストック品目を追加」ピッカー
