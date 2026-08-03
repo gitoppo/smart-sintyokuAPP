@@ -369,6 +369,10 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <input type="text" id="historySearch" placeholder="伝票番号・日付で検索" oninput="renderHistory()">
     </div>
+    <div style="margin-bottom:10px;">
+      <button class="btn-gray btn-sm" onclick="printSelectedHistoryAsPdf()">📄 選択した納品書をまとめてPDF保存</button>
+      <span style="font-size:11px;color:#999;margin-left:6px;">各項目左のチェックボックスで選択（納品書のみ対象）</span>
+    </div>
     <div id="historyList"></div>
   </div>
 </div>
@@ -1996,6 +2000,39 @@ async function submitManualSlip(){
   printDelivery(grouped, null, startNo);
 }
 
+// ③出荷履歴で選択した複数の納品書を、1回の印刷（＝1つのPDF）にまとめて出力する
+function printSelectedHistoryAsPdf(){
+  const checked = [...document.querySelectorAll('.historyCheckbox:checked')];
+  if(checked.length===0){ toast('印刷する納品書を選んでください'); return; }
+  const ids = checked.map(c=>c.dataset.id);
+  const records = ids.map(id=>st.deliveryHistory.find(r=>r.id===id)).filter(Boolean);
+
+  // 各レコード自身の出荷日・メモを保持したまま、伝票を1つのフラットな配列にする
+  const items = [];
+  records.forEach(rec=>{
+    (rec.slips||[]).forEach(slip=>{
+      items.push({slip, date: rec.shippingDate||'', memo: rec.memo||''});
+    });
+  });
+  if(items.length===0){ toast('選択した履歴に伝票データがありません'); return; }
+
+  const cutMarks = `<div class="cut-mark cut-mark-tl"></div><div class="cut-mark cut-mark-tr"></div><div class="cut-mark cut-mark-bl"></div><div class="cut-mark cut-mark-br"></div>`;
+  let printContent='';
+  for(let i=0;i<items.length;i+=3){
+    const trio=items.slice(i,i+3);
+    while(trio.length<3) trio.push(null);
+    const isLast=(i+3>=items.length);
+    printContent+=`<div class="slip-page${isLast?'':' slip-page-break'}">
+      <div class="slip-unit">${cutMarks}<div class="delivery-slip">${trio[0]?buildSlipHTML(trio[0].slip,trio[0].date,trio[0].memo):''}</div></div>
+      <div class="slip-unit">${cutMarks}<div class="delivery-slip">${trio[1]?buildSlipHTML(trio[1].slip,trio[1].date,trio[1].memo):''}</div></div>
+      <div class="slip-unit">${cutMarks}<div class="delivery-slip">${trio[2]?buildSlipHTML(trio[2].slip,trio[2].date,trio[2].memo):''}</div></div>
+    </div>`;
+  }
+  document.getElementById('printArea').innerHTML = printContent;
+  fitSlipCellText();
+  requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));
+}
+
 function printDelivery(grouped, existingRecord, startNo=1){
   const date=document.getElementById('shippingDate').value||today();
   const memo=document.getElementById('shippingMemo').value.trim();
@@ -2427,7 +2464,7 @@ function renderHistory(){
   el.innerHTML=list.map((r,i)=>`
     <div class="historyItem">
       <div class="historyHead" onclick="toggleHistory(${i})">
-        <span>${r.shippingDate||'—'}　${isChecklistRecord(r)?'📋 チェックリスト':'🖨 納品書'}</span>
+        <span>${!isChecklistRecord(r)&&r.slips&&r.slips.length>0?`<input type="checkbox" class="historyCheckbox" data-id="${r.id}" onclick="event.stopPropagation()" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">`:''}${r.shippingDate||'—'}　${isChecklistRecord(r)?'📋 チェックリスト':'🖨 納品書'}</span>
         <span style="color:#666;font-size:11px;">▼</span>
       </div>
       <div class="historyBody" id="hb_${i}">
