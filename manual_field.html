@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スマート管理 取扱説明書</title>
+<style>
+  :root {
+    --bg: #0d1520; --card: #111e2e; --border: #1e3a5f;
+    --text: #e2e8f0; --muted: #64748b; --g: #4ade80;
+    --b: #38bdf8; --y: #fbbf24; --r: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: sans-serif; font-size: 14px; line-height: 1.7; }
+  .container { max-width: 800px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; font-weight: 700; padding: 20px 0 8px; border-bottom: 2px solid var(--border); margin-bottom: 16px; }
+  h1 span { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 8px; }
+  h2 { font-size: 17px; font-weight: 700; margin: 28px 0 10px; padding: 8px 12px; background: var(--card); border-left: 4px solid var(--b); border-radius: 0 6px 6px 0; }
+  h3 { font-size: 14px; font-weight: 700; margin: 16px 0 8px; color: var(--y); }
+  p { margin-bottom: 10px; }
+  ul, ol { margin: 8px 0 10px 20px; }
+  li { margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 13px; }
+  th { background: var(--border); color: var(--text); padding: 8px 10px; text-align: left; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.03); }
+  .note { background: #0c2a35; border: 1px solid #0891b2; border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 13px; }
+  .warn { background: #2a1505; border: 1px solid #d97706; border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 13px; }
+  .note::before { content: 'ℹ️ '; }
+  .warn::before { content: '⚠️ '; }
+  code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: monospace; }
+  .qa-item { background: var(--card); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+  .qa-q { font-weight: 700; color: var(--y); margin-bottom: 6px; }
+  .qa-a { color: var(--text); font-size: 13px; }
+  .version-tag { display: inline-block; background: var(--border); color: var(--b); padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-right: 8px; }
+  .toc { background: var(--card); border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; }
+  .toc ul { list-style: none; margin: 0; padding: 0; }
+  .toc li { padding: 3px 0; }
+  .toc a { color: var(--b); text-decoration: none; font-size: 13px; }
+  .toc a:hover { text-decoration: underline; }
+  .back-to-top { position: fixed; bottom: 20px; right: 20px; background: var(--border); color: var(--b); border: none; border-radius: 50%; width: 44px; height: 44px; font-size: 20px; cursor: pointer; }
+  @media print { .back-to-top { display: none; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>スマート管理 取扱説明書 <span>v1.3 / 2026年7月2日</span></h1>
+
+<div class="toc">
+  <strong style="font-size:13px;color:var(--muted)">目次</strong>
+  <ul style="margin-top:8px">
+    <li><a href="#setup">初期設定</a></li>
+    <li><a href="#syncbar">同期バー</a></li>
+    <li><a href="#tab1">①進捗タブ</a></li>
+    <li><a href="#tab2">②個人タブ</a></li>
+    <li><a href="#tab3">③計画タブ</a></li>
+    <li><a href="#tabstock">📦ストックタブ</a></li>
+    <li><a href="#tab4">④勤怠タブ</a></li>
+    <li><a href="#tab5">⑤シフトタブ</a></li>
+    <li><a href="#tab6">⑥品目タブ</a></li>
+    <li><a href="#settings">⚙️設定タブ</a></li>
+    <li><a href="#qa">トラブルシューティング Q&amp;A</a></li>
+    <li><a href="#admin">管理者向け復旧手順</a></li>
+    <li><a href="#history">更新履歴</a></li>
+  </ul>
+</div>
+
+<p>「スマート管理」は工場の生産進捗をリアルタイムで複数端末から共有・管理するアプリです。タブレット・スマートフォン・PCのChromeブラウザから使用できます。</p>
+<p><strong>アプリURL：</strong> <a href="https://gitoppo.github.io/smart-sintyokuAPP/" style="color:var(--b)">https://gitoppo.github.io/smart-sintyokuAPP/</a></p>
+
+<h2 id="setup">初期設定</h2>
+
+<h3>GAS URLの設定</h3>
+<ol>
+  <li>⚙️設定タブを開く</li>
+  <li>「GAS URL」欄に管理者から渡されたURLを貼り付ける</li>
+  <li>「保存」ボタンを押す</li>
+  <li>「接続確認」ボタンを押して「✅ 接続OK」と表示されればOK</li>
+</ol>
+
+<h3>端末名の設定</h3>
+<ol>
+  <li>⚙️設定タブを開く</li>
+  <li>「端末名」欄に担当者名を入力（例：神崎、伊藤）</li>
+  <li>「保存」ボタンを押す</li>
+</ol>
+<div class="warn">端末名は重複不可。各端末で必ず設定してください。運用開始後は変更しないでください。</div>
+
+<h2 id="syncbar">同期バー（画面上部・常時表示）</h2>
+<p>画面上部のナビゲーションバー直下に常時表示されます。</p>
+<table>
+  <tr><th>表示</th><th>意味</th></tr>
+  <tr><td>⚠️ 未送信のデータあり（送信中...）</td><td>入力後、クラウドへ送信中</td></tr>
+  <tr><td>✅ 最終同期: HH:MM:SS</td><td>正常に同期完了</td></tr>
+  <tr><td>❌ 同期失敗（最終成功: HH:MM:SS）</td><td>通信エラーが発生</td></tr>
+  <tr><td>🔄 同期中...</td><td>手動更新または自動ポーリング中</td></tr>
+</table>
+<p>「🔄 今すぐ更新」ボタンを押すと手動で最新データを取得します。</p>
+<div class="warn">画面を閉じる前に必ず「✅」を確認してください。送信完了前に閉じると入力内容が失われる可能性があります。閉じようとすると警告ダイアログが表示されます。</div>
+
+<h2 id="tab1">①進捗タブ</h2>
+<p>全端末の生産進捗を一覧で確認するタブです。</p>
+<h3>タイル表示</h3>
+<ul>
+  <li>3列グリッドでグループ（品目名）ごとに表示</li>
+  <li>並び順：優先 → 未完了 → 完了（グレーアウト）</li>
+  <li>各タイルに「予定・進捗・残」を表示（3桁以上は自動で長体表示）</li>
+</ul>
+<h3>タイルをタップすると</h3>
+<p>ボトムシートが開き、カラー別の後工程実績（読み取り専用）を確認できます。</p>
+<h3>アラートバー（上部緑バー）</h3>
+<p>後工程ベースで計算した必要残工数・余裕時間を表示します。</p>
+
+<h2 id="tab2">②個人タブ</h2>
+<p>自分の端末から進捗を入力するタブです。</p>
+<h3>タイル表示</h3>
+<ul>
+  <li>品目マスター順で表示</li>
+  <li>各タイルに「予定・進捗・残」を表示</li>
+</ul>
+<h3>タイルをタップすると</h3>
+<p>ボトムシートが開き、カラー別に入力できます。</p>
+<table>
+  <tr><th>表示</th><th>内容</th></tr>
+  <tr><td>中央の数値入力欄</td><td>今日の自分の入力数（±ボタンで増減）</td></tr>
+  <tr><td>予定</td><td>計画数量</td></tr>
+  <tr><td>全端末</td><td>全端末の今日の合計</td></tr>
+  <tr><td>自分累計</td><td>自分の全日付累計</td></tr>
+</table>
+<div class="note">全端末合計が予定数に達すると、そのカラーはグレーアウトして入力不可になります（完了ロック）。</div>
+
+<h2 id="tab3">③計画タブ</h2>
+<p>生産計画の登録・管理を行うタブです。</p>
+<h3>CSVインポート（推奨）</h3>
+<ol>
+  <li>「CSVインポート」セクションを開く</li>
+  <li>「ファイルを選択」でCSVファイルを選ぶ</li>
+  <li>自動的に全計画が入れ替わる</li>
+</ol>
+<p><strong>CSV列順：</strong> <code>品目名, カラー, 数量, 納期(YYYY-MM-DD), メモ, 優先(1/0)</code></p>
+<div class="warn">インポートは<strong>完全置換</strong>です。既存の計画・進捗が全て入れ替わります。</div>
+<h3>直前の状態に戻す</h3>
+<p>インポート前のデータは自動バックアップされます。「↩️ 直前のインポート前の状態に戻す」ボタンで復元できます（1回分のみ）。</p>
+<h3>手入力での計画登録</h3>
+<p>「新規計画登録（手入力）」セクションを開いて品目・数量・納期を入力します。</p>
+<h3>タイルをタップすると</h3>
+<p>ボトムシートが開き、カラー別の予定数・納期・優先設定・編集・削除ができます。</p>
+
+<h2 id="tabstock">📦ストックタブ</h2>
+<p>本番計画が確定する前の先行生産分を記録するタブです。計画データとは連動しません。</p>
+
+<h3>運用シナリオ</h3>
+<ol>
+  <li><strong>火曜朝〜水曜昼：</strong>前サイクルの数量を目安に先行生産 → ストックタブに入力</li>
+  <li><strong>水曜昼：</strong>本番CSVを③計画タブでインポート</li>
+  <li><strong>水曜昼：</strong>ストックタブの「📋 ②個人タブへ転記」ボタンで一括転記</li>
+  <li>そのまま②個人タブで通常通り進捗入力を続ける</li>
+</ol>
+<div class="warn">必ず「本番CSVインポート→転記」の順で行ってください。転記後にインポートすると転記した進捗が消えます。</div>
+
+<h3>品目の追加</h3>
+<ol>
+  <li>「＋ ストック品目を追加」ボタンをタップ</li>
+  <li>品目名一覧から選択</li>
+  <li>ボトムシートが開き、カラー別に入力できる</li>
+</ol>
+
+<h3>ボトムシートの表示</h3>
+<table>
+  <tr><th>表示</th><th>内容</th></tr>
+  <tr><td>中央の数値入力欄</td><td>今日の自分の入力数（±ボタンで増減）</td></tr>
+  <tr><td>全端末</td><td>全端末・全日付の合計</td></tr>
+  <tr><td>自分累計</td><td>自分の全日付累計</td></tr>
+  <tr><td>🗑（各行右端）</td><td>そのカラーのみ削除</td></tr>
+</table>
+
+<h3>削除方法</h3>
+<ul>
+  <li><strong>カラー単位で削除：</strong>各カラー行の右端の🗑ボタン</li>
+  <li><strong>グループ（品目名）単位で削除：</strong>ボトムシート下部の「🗑 このストック品目を削除」ボタン</li>
+</ul>
+
+<h3>📋 ②個人タブへ転記</h3>
+<p>本番CSVインポート後に押すボタンです。</p>
+<ol>
+  <li>ストックの全端末合計を②個人タブの進捗（今日の日付）に反映</li>
+  <li>転記前に確認ダイアログで転記内容・スキップ内容を表示</li>
+  <li>OKを押すと転記レポートが印刷ダイアログで開く（PDF保存推奨）</li>
+  <li>転記済み品目はストックから自動削除</li>
+  <li>計画にない品目はスキップされてストックに残る</li>
+</ol>
+<div class="note">転記レポートのPDF保存を推奨します。万一のCSVインポートタイミングのずれに備えて、次の計画インポートまで保管してください。</div>
+<div class="note">ポップアップがブロックされた場合は、ブラウザの設定でこのサイトのポップアップを許可してください。</div>
+
+<h2 id="tab4">④勤怠タブ</h2>
+<p>メンバーの出退勤時刻・休憩時間を記録するタブです。</p>
+<div class="note">④勤怠・⑤シフトタブが開いている間は、他端末のデータによる自動更新が停止します（入力中の上書き防止）。タブを切り替えると最新データが反映されます。</div>
+
+<h2 id="tab5">⑤シフトタブ</h2>
+<p>基本シフト（標準の勤務時間）を設定するタブです。ゆっくり入力しても自動更新で上書きされる心配はありません。</p>
+
+<h2 id="tab6">⑥品目タブ</h2>
+<p>品目マスターの管理を行うタブです。</p>
+<h3>CSVインポート</h3>
+<p><strong>CSV列順：</strong> <code>品目名, カラー, 前工程時間(分/個), 後工程時間(分/個), シート品番, カット幅, カット長, グループ, 単価, 表示名, 表示カラー, 箱入数(caseQty)</code></p>
+<div class="note">品目マスターを更新（再インポート）しても、ストックタブのデータは品目名＋カラーで自動照合して引き継がれます。</div>
+
+<h2 id="settings">⚙️設定タブ</h2>
+<h3>端末別進捗レポート</h3>
+<p>各端末がいつ何個入力したかを確認できます。進捗がおかしい場合はこちらで確認してください。</p>
+<h3>全データ送信</h3>
+<p>ローカルの全データをクラウドに強制送信します。同期が取れていない場合に使用してください。</p>
+<h3>取扱説明書</h3>
+<p>「📖 取扱説明書を開く」ボタンからこのページを開けます。</p>
+
+<h2 id="qa">トラブルシューティング Q&amp;A</h2>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 進捗が他の端末に反映されない</div>
+  <div class="qa-a">以下の順に確認してください。<br>①同期バーが「✅」になっているか確認。「❌」の場合は「🔄 今すぐ更新」を押す<br>②それでも直らない場合は⚙️設定タブでGAS URLを一度消して再入力<br>③⚙️設定タブの「接続確認」で「✅ 接続OK」が出るか確認</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 入力した進捗が消えてしまった</div>
+  <div class="qa-a">画面を閉じる前に同期バーの「✅」を確認していなかった可能性があります。終業時は必ず「✅」を確認してから画面を閉じてください。消えてしまった場合は管理者に連絡し、⚙️設定タブの「端末別進捗レポート」で最後の入力値を確認できます。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 計画インポートで進捗が消えてしまった</div>
+  <div class="qa-a">③計画タブの「↩️ 直前のインポート前の状態に戻す」ボタンで復元できます（直前の1回分のみ）。ボタンが表示されていない場合はGoogleスプレッドシートの「版の履歴」から復旧してください。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. ②個人タブで入力できない（グレーアウトしている）</div>
+  <div class="qa-a">全端末の合計が予定数に達したため、完了ロックがかかっています。予定数を超えて入力する必要がある場合は管理者に連絡してください。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 同期バーに「❌ 同期失敗」が表示される</div>
+  <div class="qa-a">ネットワークの瞬断やサーバーの一時的な混雑が原因です。しばらく待ってから「🔄 今すぐ更新」を押してください。繰り返し失敗する場合はGAS URLを再入力してください。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. アプリが更新されない（古い画面のまま）</div>
+  <div class="qa-a">ブラウザのキャッシュが原因です。<br>PC：Ctrl+Shift+R<br>スマートフォン・タブレット：タブを一度閉じて開き直す、またはブラウザの設定からキャッシュを削除</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 計画にない品目をストックに入力してしまった</div>
+  <div class="qa-a">ストックタブのボトムシートを開き、不要なカラーは右端の🗑ボタンで個別削除、グループごと削除する場合はボトムシート下部の「🗑 このストック品目を削除」ボタンを使ってください。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 転記レポートのポップアップが開かない</div>
+  <div class="qa-a">ブラウザのポップアップブロック機能が有効になっています。Chromeの場合、アドレスバー右側に表示されるポップアップブロックのアイコンをクリックして「許可」に変更してください。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 転記後に本番CSVをインポートしてしまった</div>
+  <div class="qa-a">③計画タブの「↩️ 直前のインポート前の状態に戻す」ボタンで転記した進捗ごと復元できます。復元後、改めて「本番CSVインポート→転記」の順で操作してください。</div>
+</div>
+
+<div class="qa-item">
+  <div class="qa-q">Q. 端末名を変更したらデータはどうなりますか？</div>
+  <div class="qa-a">端末名は進捗データのキーとして使われているため、変更すると過去のデータと紐付かなくなります。端末名は運用開始後は変更しないでください。変更が必要な場合は管理者に相談してください。</div>
+</div>
+
+<h2 id="admin">管理者向け：復旧手順</h2>
+
+<h3>スプレッドシートから復旧する場合</h3>
+<ol>
+  <li>Googleスプレッドシートを開く</li>
+  <li>メニュー「ファイル」→「版の履歴」→「版の履歴を表示」</li>
+  <li>誤操作前の時刻のスナップショットを選んで復元</li>
+</ol>
+
+<h3>GASの更新手順</h3>
+<ol>
+  <li>GASエディタを開く（スプレッドシート→拡張機能→Apps Script）</li>
+  <li>全選択（Ctrl+A）→新しいコードを貼り付け</li>
+  <li><strong>Ctrl+Sで保存</strong>（必須）</li>
+  <li>「デプロイ」→「デプロイを管理」→鉛筆アイコン→「新バージョン」→「デプロイ」</li>
+</ol>
+<div class="warn">保存せずにデプロイしても古いコードのままになります。必ずCtrl+Sで保存してからデプロイしてください。</div>
+
+<h2 id="history">更新履歴</h2>
+<table>
+  <tr><th>バージョン</th><th>日付</th><th>主な変更内容</th></tr>
+  <tr><td><span class="version-tag">v1.0</span></td><td>2026/6/27</td><td>初版リリース（タイル＋ボトムシートUI）</td></tr>
+  <tr><td><span class="version-tag">v1.1</span></td><td>2026/6/30</td><td>タイルに残数表示・計画タブCSV完全置換化・バックアップ機能・ストックタブ追加・同期バー追加</td></tr>
+  <tr><td><span class="version-tag">v1.2</span></td><td>2026/7/2</td><td>完了ロック機能・未送信警告・カラー単位削除・端末別ストック管理・④⑤タブ入力保護</td></tr>
+  <tr><td><span class="version-tag">v1.3</span></td><td>2026/7/2</td><td>ストック→②個人タブへの一括転記機能・転記レポート印刷・⚙️設定タブに取説リンク追加</td></tr>
+</table>
+
+</div>
+<button class="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+</body>
+</html>
