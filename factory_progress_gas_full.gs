@@ -7,6 +7,7 @@ function doGet(e) {
     const action = e.parameter.action || '';
     if (action === 'ping') return ok({ message: 'pong' });
     if (action === 'getAll') return getAll_();
+    if (action === 'getEverything') return getEverything_();
     if (action === 'diagnoseSize') return diagnoseSize_();
     if (action === 'getShipping') return getShipping_();
     if (action === 'getMaterialStock') return getMaterialStock_();
@@ -71,6 +72,63 @@ function diagnoseSize_() {
     result[name] = { exists: true, rows: lastRow, cols: lastCol, approxChars: bytes };
   });
   return ok({ diagnosis: result });
+}
+
+// getAll・getShipping・getMaterialStockの3回の呼び出しを1回にまとめたもの。
+// 端末が複数同時に使う環境では、呼び出し回数そのものを減らすことで混雑・エラーを軽減する
+function getEverything_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ---- getAll_相当 ----
+  const itemMaster   = readJsonSheet_(ss, 'itemMaster');
+  const plans        = readPlansSheet_(ss);
+  const progress     = readProgressSheet_(ss);
+  const shiftAttend  = readShiftAttend_(ss);
+  const operationLog = readJsonSheet_(ss, 'operationLog');
+  const stock        = readStockSheet_(ss);
+
+  // ---- getShipping_相当 ----
+  let deliveryHistory = [];
+  let workData = null;
+  try {
+    let dhSheet = ss.getSheetByName('deliveryHistory');
+    if (!dhSheet) {
+      dhSheet = ss.insertSheet('deliveryHistory');
+      dhSheet.appendRow(['id','timestamp','deviceName','deliveryNo','memo','palletsJson','shippingDate','type']);
+    }
+    const rows = dhSheet.getDataRange().getValues();
+    const headers = rows[0];
+    deliveryHistory = rows.slice(1).map(function (row) {
+      const obj = {};
+      headers.forEach(function (h, i) {
+        if (row[i] instanceof Date) {
+          obj[h] = Utilities.formatDate(row[i], 'Asia/Tokyo', 'yyyy-MM-dd');
+        } else {
+          obj[h] = row[i];
+        }
+      });
+      return obj;
+    });
+    const workSheet = ss.getSheetByName('shippingWork');
+    if (workSheet && workSheet.getLastRow() >= 2) {
+      const raw = workSheet.getRange(2, 1).getValue();
+      if (raw) {
+        try { workData = JSON.parse(raw); } catch (e) { workData = null; }
+      }
+    }
+  } catch (e) { /* 出荷関連が読めなくても他のデータは返す */ }
+
+  // ---- getMaterialStock_相当 ----
+  const msSettingsArr = readJsonSheet_(ss, 'materialStockSettings');
+  const msSettings = msSettingsArr[0] || { enabledGroups: [], baseline: {}, baselineDate: '' };
+  const msMovements = readJsonSheet_(ss, 'materialMovements');
+
+  return ok({
+    itemMaster: itemMaster, plans: plans, progress: progress,
+    shiftAttend: shiftAttend, operationLog: operationLog, stock: stock,
+    deliveryHistory: deliveryHistory, workData: workData,
+    settings: msSettings, movements: msMovements
+  });
 }
 
 function getAll_() {
