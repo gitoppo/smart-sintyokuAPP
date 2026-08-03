@@ -196,53 +196,25 @@ function saveAll_(p) {
 }
 
 // ============================================================
-// stock（ストックタブ：端末別管理）
+// stock（ストックタブ：計画とは独立した品目別ストック数量）
 // ============================================================
 function saveStock_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    lock.waitLock(10000); // 最大10秒待機
   } catch (e) {
     return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
   }
   try {
-    const current = readStockSheet_(ss);
-    const incoming = p.stock || {};
-    const isDelete = p.isDelete || false;
-
-    if (isDelete) {
-      // 削除操作：送信されてきたitemIdのキーをクラウドから削除
-      const deletedIds = p.deletedIds || [];
-      deletedIds.forEach(function(itemId) {
-        delete current[itemId];
-      });
-      // 残りのitemIdはマージ
-      Object.keys(incoming).forEach(function(itemId) {
-        var entry = incoming[itemId] || {};
-        if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
-        Object.keys(entry).forEach(function(deviceDateKey) {
-          current[itemId][deviceDateKey] = entry[deviceDateKey];
-        });
-      });
-    } else {
-      // 通常の入力：マージ保存
-      Object.keys(incoming).forEach(function(itemId) {
-        var entry = incoming[itemId] || {};
-        if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
-        Object.keys(entry).forEach(function(deviceDateKey) {
-          current[itemId][deviceDateKey] = entry[deviceDateKey];
-        });
-      });
-    }
-    writeStockSheet_(ss, current);
+    writeStockSheet_(ss, p.stock || {});
     return ok({});
   } finally {
     lock.releaseLock();
   }
 }
 
-// stockシート: itemId, entry(JSON)
+// stockシート: itemId,qty
 function readStockSheet_(ss) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) return {};
@@ -252,8 +224,7 @@ function readStockSheet_(ss) {
   for (var i = 1; i < data.length; i++) {
     var r = data[i];
     if (!r[0]) continue;
-    try { result[String(r[0])] = JSON.parse(String(r[1] || '{}')); }
-    catch(e) { result[String(r[0])] = {}; }
+    result[String(r[0])] = Number(r[1] || 0);
   }
   return result;
 }
@@ -262,9 +233,9 @@ function writeStockSheet_(ss, stock) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) sheet = ss.insertSheet('stock');
   sheet.clearContents();
-  var rows = [['itemId', 'entry']];
+  var rows = [['itemId','qty']];
   Object.keys(stock).forEach(function(itemId) {
-    rows.push([itemId, JSON.stringify(stock[itemId] || {})]);
+    rows.push([itemId, stock[itemId]]);
   });
   sheet.getRange(1, 1, rows.length, 2).setValues(rows);
 }
@@ -534,9 +505,15 @@ function archiveOperationLog_(p) {
     if (data.length < 2) return ok({ message: '対象がありませんでした', archivedCount: 0 });
 
     const header = data[0];
-    const keepMonths = (p && p.keepMonths) || OPERATION_LOG_KEEP_MONTHS;
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - keepMonths);
+    // planと同じ「当月より前」を基準にする（keepMonths指定があれば従来どおりそちらを優先）
+    const currentMonth = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM');
+    let cutoff;
+    if (p && p.keepMonths) {
+      cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - p.keepMonths);
+    } else {
+      cutoff = new Date(currentMonth + '-01T00:00:00'); // 当月1日0時（＝これより前は当月より前）
+    }
 
     const kept = [header];
     const toArchive = [];
@@ -825,7 +802,18 @@ function saveShippingWork_(p) {
       sheet.appendRow(['json']);
     }
     if (sheet.getLastRow() < 2) sheet.appendRow(['']);
-    sheet.getRange(2, 1).setValue(JSON.stringify(p.workData || {}));
+    const json = JSON.stringify(p.workData || {});
+    // Googleスプレッドシートは1セルあたり5万文字が上限。超える場合はここで検知して分かりやすく返す
+    // （超過したままsetValueすると例外になり、クライアント側が誤って「保存成功」と扱ってしまうため）
+    if (json.length > 48000) {
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          ok: false,
+          error: 'データが大きすぎて保存できません（' + json.length + '文字／上限48000文字）。使い終わったパレットを削除してください。'
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    sheet.getRange(2, 1).setValue(json);
     return ContentService
       .createTextOutput(JSON.stringify({ ok: true }))
       .setMimeType(ContentService.MimeType.JSON);
