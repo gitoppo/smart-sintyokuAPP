@@ -542,7 +542,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div class="cardTitle">サーバーメンテナンス</div>
     <div style="font-size:12px;color:#666;margin-bottom:8px;">
       現場用アプリと共有しているスプレッドシートが重くなってきた場合に実行してください。<br>
-      当月より前の生産計画・進捗実績、および直近3ヶ月より古い作業ログは、それぞれ専用のアーカイブシートに退避されます（削除ではなく移動なので、あとから見返せます。普段の読み込み速度にも影響しません）。
+      当月より前の生産計画・進捗実績・作業ログは、それぞれ専用のアーカイブシートに退避されます（削除ではなく移動なので、あとから見返せます。普段の読み込み速度にも影響しません）。
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-warn" onclick="archiveOldMonths()">🗄 古い生産計画をアーカイブ</button>
@@ -861,7 +861,7 @@ async function archiveOldMonths(){
 
 async function archiveOperationLog(){
   if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
-  if(!confirm('直近3ヶ月より古い作業ログ（operationLog）を、operationLog_archiveシートへ退避します。\n（削除ではなく移動なので、あとからスプレッドシート上で見返せます）\n\n実行しますか？')) return;
+  if(!confirm('当月より前の作業ログ（operationLog）を、operationLog_archiveシートへ退避します。\n（削除ではなく移動なので、あとからスプレッドシート上で見返せます）\n\n実行しますか？')) return;
   showLoading(true);
   try{
     const res = await gasPost({action:'archiveOperationLog'});
@@ -898,12 +898,21 @@ async function saveShippingWork(){
     updatedAt:    new Date().toISOString()
   };
   try{
-    await gasPost({action:'saveShippingWork', workData});
+    const res = await gasPost({action:'saveShippingWork', workData});
+    if(!res || res.ok !== true){
+      // 保存失敗：サーバーには反映されていないので、成功したかのように扱わない（_localDirtyは落とさない＝ポーリングでの上書きを止め続ける）
+      console.warn('作業中データ保存エラー', res && res.error);
+      toast('⚠️ 保存に失敗しました（'+(res&&res.error?res.error:'サーバーエラー')+'）。ネットワークを確認し、少ししてからもう一度操作してください。');
+      return;
+    }
     st.lastSyncedWorkAt = workData.updatedAt; // 自分がpushした内容を最新として記録（次回起動時の誤った未同期判定を防ぐ）
     saveLocalState();
     _localDirty = false; // 保存完了。ここまでの編集はサーバーに反映済み
   }
-  catch(e){ console.warn('作業中データ保存エラー',e); }
+  catch(e){
+    console.warn('作業中データ保存エラー',e);
+    toast('⚠️ 保存に失敗しました（通信エラー）。ネットワークを確認し、少ししてからもう一度操作してください。');
+  }
 }
 
 // 未保存のローカル編集があるかどうか（trueの間はポーリングによるサーバー上書きを止める）
