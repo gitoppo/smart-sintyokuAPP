@@ -767,7 +767,13 @@ async function gasPost(payload){
 async function loadFromGas(){
   showLoading(true);
   try{
-    const data = await gasGet('getAll');
+    // 3つの通信は互いに依存しないため、順番に待たず同時に投げて時間を短縮する
+    const [data, shData, msData] = await Promise.all([
+      gasGet('getAll'),
+      gasGet('getShipping'),
+      gasGet('getMaterialStock')
+    ]);
+
     if(data && Array.isArray(data.itemMaster) && data.itemMaster.length > 0){
       st.itemMaster = data.itemMaster.map(it=>({
         id:        String(it.id||''),
@@ -787,7 +793,7 @@ async function loadFromGas(){
     }
     if(data && data.plans)    st.plans    = data.plans;
     if(data && data.progress) st.progress = data.progress;
-    const shData = await gasGet('getShipping');
+
     if(shData){
       if(shData.deliveryHistory){
         // GASのデータで常に上書き（全端末で同じ履歴を共有）
@@ -817,7 +823,7 @@ async function loadFromGas(){
       }
       saveLocalState();
     }
-    const msData = await gasGet('getMaterialStock');
+
     if(msData && msData.ok){
       st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
       const serverMovements = msData.movements || [];
