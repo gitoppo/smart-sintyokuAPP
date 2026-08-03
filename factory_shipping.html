@@ -963,7 +963,7 @@ function startPolling(){
       saveLocalState();
       renderItemTiles(); renderPallets(); renderBara(); renderMaterial();
     }catch(e){}
-  }, 30000);
+  }, 60000); // 通信回数削減のため30秒→60秒に変更
 }
 
 let _workSaveTimer=null;
