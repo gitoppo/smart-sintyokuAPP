@@ -767,12 +767,9 @@ async function gasPost(payload){
 async function loadFromGas(){
   showLoading(true);
   try{
-    // 3つの通信は互いに依存しないため、順番に待たず同時に投げて時間を短縮する
-    const [data, shData, msData] = await Promise.all([
-      gasGet('getAll'),
-      gasGet('getShipping'),
-      gasGet('getMaterialStock')
-    ]);
+    // 3回に分かれていた通信をGAS側で1回にまとめたエンドポイントを使う（混雑・エラーの軽減のため）
+    const all = await gasGet('getEverything');
+    const data = all, shData = all, msData = all;
 
     if(data && Array.isArray(data.itemMaster) && data.itemMaster.length > 0){
       st.itemMaster = data.itemMaster.map(it=>({
