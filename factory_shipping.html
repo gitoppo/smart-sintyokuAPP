@@ -547,6 +547,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-warn" onclick="archiveOldMonths()">🗄 古い生産計画をアーカイブ</button>
       <button class="btn-warn" onclick="archiveOperationLog()">🗄 古い作業ログをアーカイブ</button>
+      <button class="btn-gray" onclick="diagnoseSize()">🔍 データ量を診断</button>
     </div>
   </div>
 </div>
@@ -869,6 +870,28 @@ async function archiveOperationLog(){
     else{ toast('エラー: '+(res?res.error:'不明なエラー')); }
   }catch(e){ toast('通信エラー: '+e.message); }
   finally{ showLoading(false); }
+}
+
+// 各シートの行数・データ量を診断し、読み込みが重い原因を特定するための一覧を表示する
+async function diagnoseSize(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+  showLoading(true);
+  try{
+    const res = await gasGet('diagnoseSize');
+    showLoading(false);
+    if(!res || !res.ok){ toast('診断に失敗しました: '+(res?res.error:'不明なエラー')); return; }
+    const d = res.diagnosis;
+    const lines = Object.entries(d)
+      .filter(([name,info])=>info.exists)
+      .sort((a,b)=>(b[1].approxChars||0)-(a[1].approxChars||0))
+      .map(([name,info])=>`${name}：${info.rows}行／約${info.approxChars.toLocaleString()}文字`)
+      .join('\n');
+    const notFound = Object.entries(d).filter(([name,info])=>!info.exists).map(([name])=>name);
+    alert('【データ量診断（文字数の多い順）】\n\n'+lines+(notFound.length?'\n\n（シートなし: '+notFound.join('、')+'）':''));
+  }catch(e){
+    showLoading(false);
+    toast('通信エラー: '+e.message);
+  }
 }
 
 // ===== 作業中データ保存 =====
