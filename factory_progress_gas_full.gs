@@ -7,6 +7,7 @@ function doGet(e) {
     const action = e.parameter.action || '';
     if (action === 'ping') return ok({ message: 'pong' });
     if (action === 'getAll') return getAll_();
+    if (action === 'diagnoseSize') return diagnoseSize_();
     if (action === 'getShipping') return getShipping_();
     if (action === 'getMaterialStock') return getMaterialStock_();
     return errRes('unknown action: ' + action);
@@ -45,6 +46,33 @@ function doPost(e) {
 // ============================================================
 // getAll
 // ============================================================
+// 診断用：各シートの行数・データ量（おおよそのバイト数）を調べて、読み込みが重い原因を特定する
+function diagnoseSize_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetNames = [
+    'itemMaster', 'plans', 'progress', 'shiftAttend', 'operationLog', 'stock',
+    'deliveryHistory', 'shippingWork', 'materialStockSettings', 'materialMovements'
+  ];
+  const result = {};
+  sheetNames.forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) { result[name] = { exists: false }; return; }
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    let bytes = 0;
+    if (lastRow > 0 && lastCol > 0) {
+      const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+      values.forEach(function (row) {
+        row.forEach(function (cell) {
+          if (cell) bytes += String(cell).length;
+        });
+      });
+    }
+    result[name] = { exists: true, rows: lastRow, cols: lastCol, approxChars: bytes };
+  });
+  return ok({ diagnosis: result });
+}
+
 function getAll_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   return ok({
