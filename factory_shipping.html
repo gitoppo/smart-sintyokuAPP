@@ -548,6 +548,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <button class="btn-warn" onclick="archiveOldMonths()">🗄 古い生産計画をアーカイブ</button>
       <button class="btn-warn" onclick="archiveOperationLog()">🗄 古い作業ログをアーカイブ</button>
       <button class="btn-gray" onclick="diagnoseSize()">🔍 データ量を診断</button>
+      <button class="btn-gray" onclick="diagnoseAllSheets()">🔍 全シートを診断（現場アプリ側も含む）</button>
     </div>
   </div>
 </div>
@@ -891,6 +892,25 @@ async function diagnoseSize(){
       .join('\n');
     const notFound = Object.entries(d).filter(([name,info])=>!info.exists).map(([name])=>name);
     alert('【データ量診断（文字数の多い順）】\n\n'+lines+(notFound.length?'\n\n（シートなし: '+notFound.join('、')+'）':''));
+  }catch(e){
+    showLoading(false);
+    toast('通信エラー: '+e.message);
+  }
+}
+
+// スプレッドシート内の「すべての」シートを対象に診断する（現場アプリ側のシートも含む、広域版）
+async function diagnoseAllSheets(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+  showLoading(true);
+  try{
+    const res = await gasGet('diagnoseAllSheets');
+    showLoading(false);
+    if(!res || !res.ok){ toast('診断に失敗しました: '+(res?res.error:'不明なエラー')); return; }
+    const sorted = [...res.sheets].sort((a,b)=>(b.approxChars||0)-(a.approxChars||0));
+    const lines = sorted.map(s=>
+      `${s.name}：${s.rows}行×${s.cols}列／約${s.approxChars.toLocaleString()}文字${s.sampled?'（概算）':''}／読込${s.readMs}ms`
+    ).join('\n');
+    alert(`【全シート診断】シート数:${res.sheetCount}　診断全体の所要時間:${res.totalMs}ms\n（文字数の多い順）\n\n${lines}`);
   }catch(e){
     showLoading(false);
     toast('通信エラー: '+e.message);
