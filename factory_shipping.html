@@ -735,8 +735,12 @@ function newPallet(){
 async function _gasFetch(url, options, retries=2){
   let lastErr;
   for(let i=0; i<=retries; i++){
+    const controller = new AbortController();
+    // 25秒応答が無ければ諦めて再試行する（応答が永遠に返らずフリーズするのを防ぐ）
+    const timeoutId = setTimeout(()=>controller.abort(), 25000);
     try{
-      const res = await fetch(url, options);
+      const res = await fetch(url, {...options, signal:controller.signal});
+      clearTimeout(timeoutId);
       const text = await res.text();
       // GAS障害時、JSONではなくHTMLエラーページが返ることがあるため検証
       if(!res.ok || text.trim().startsWith('<')){
@@ -744,7 +748,8 @@ async function _gasFetch(url, options, retries=2){
       }
       return JSON.parse(text);
     }catch(e){
-      lastErr = e;
+      clearTimeout(timeoutId);
+      lastErr = e.name==='AbortError' ? new Error('GASからの応答がタイムアウトしました（25秒）') : e;
       if(i < retries) await new Promise(r=>setTimeout(r, 800*(i+1))); // 少し待って再試行
     }
   }
