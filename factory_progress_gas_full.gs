@@ -35,6 +35,7 @@ function doPost(e) {
     if (action === 'saveStock')           return saveStock_(p);
     if (action === 'archiveOldMonths')    return archiveOldMonths_(p);
     if (action === 'archiveOperationLog') return archiveOperationLog_(p);
+    if (action === 'migrateOperationLogArchive') return migrateOperationLogArchive_();
     if (action === 'saveMaterialStockSettings') return saveMaterialStockSettings_(p);
     if (action === 'saveMaterialMovement')      return saveMaterialMovement_(p);
     if (action === 'deleteMaterialMovement')    return deleteMaterialMovement_(p);
@@ -549,18 +550,19 @@ function archiveOldMonths_(p) {
       return ok({ message: 'アーカイブ対象の月はありませんでした（当月より前の計画データなし）', archivedMonths: [] });
     }
 
+    const archiveSs = getOrCreateArchiveSpreadsheet_();
     archivedMonths.forEach(function (month) {
       const monthPlans = byMonth[month];
       const planIds = {};
       monthPlans.forEach(function (pl) { planIds[pl.id] = true; });
 
-      appendPlansArchive_(ss, month, monthPlans);
+      appendPlansArchive_(archiveSs, month, monthPlans);
 
       const monthProgress = {};
       Object.keys(progress).forEach(function (planId) {
         if (planIds[planId]) monthProgress[planId] = progress[planId];
       });
-      appendProgressArchive_(ss, month, monthProgress);
+      appendProgressArchive_(archiveSs, month, monthProgress);
     });
 
     // 元のplans/progressから、アーカイブ済みの月のデータを削除
@@ -620,6 +622,68 @@ function appendProgressArchive_(ss, month, progressObj) {
 //    アーカイブシートは通常の読み込み処理(getAll_)の対象外なので、読み込み速度には影響しない
 var OPERATION_LOG_KEEP_MONTHS = 3; // 保持期間（月数）。変更したい場合はここを編集する
 
+// アーカイブ専用の別スプレッドシートを取得する（無ければ新規作成し、IDをスクリプトプロパティに保存する）
+// これにより、本体のスプレッドシートに退避データを溜め込まず、読み込み速度への影響を避ける
+function getOrCreateArchiveSpreadsheet_() {
+  const props = PropertiesService.getScriptProperties();
+  const savedId = props.getProperty('ARCHIVE_SS_ID');
+  if (savedId) {
+    try {
+      return SpreadsheetApp.openById(savedId);
+    } catch (e) {
+      // 保存されていたIDが無効な場合は作り直す
+    }
+  }
+  const newSs = SpreadsheetApp.create('出荷管理アプリ_アーカイブ保管庫');
+  props.setProperty('ARCHIVE_SS_ID', newSs.getId());
+  return newSs;
+}
+
+// 【1回限りの移行用】本体スプレッドシートに残っている古いアーカイブ系シート
+// （operationLog_archive、plans_archive_*、progress_archive_*）を、
+// 外部のアーカイブ保管庫スプレッドシートへ移し、本体側のシートは削除する
+function migrateOperationLogArchive_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const archiveSs = getOrCreateArchiveSpreadsheet_();
+  const allSheets = ss.getSheets();
+  const targets = allSheets.filter(function (s) {
+    const n = s.getName();
+    return n === 'operationLog_archive' || n.indexOf('plans_archive_') === 0 || n.indexOf('progress_archive_') === 0;
+  });
+
+  if (targets.length === 0) {
+    return ok({ message: '本体スプレッドシートに移行対象のアーカイブシートは見つかりませんでした（すでに移行済みの可能性があります）', movedSheets: [] });
+  }
+
+  const movedSheets = [];
+  targets.forEach(function (oldSheet) {
+    const name = oldSheet.getName();
+    const data = oldSheet.getDataRange().getValues();
+    if (data.length <= 1) {
+      ss.deleteSheet(oldSheet);
+      movedSheets.push(name + '（空のため削除のみ）');
+      return;
+    }
+    const header = data[0];
+    const bodyRows = data.slice(1);
+    let newSheet = archiveSs.getSheetByName(name);
+    if (!newSheet) {
+      newSheet = archiveSs.insertSheet(name);
+      newSheet.getRange(1, 1, 1, header.length).setValues([header]);
+    }
+    const existingLastRow = newSheet.getLastRow();
+    newSheet.getRange(existingLastRow + 1, 1, bodyRows.length, header.length).setValues(bodyRows);
+    ss.deleteSheet(oldSheet);
+    movedSheets.push(name + '（' + bodyRows.length + '件）');
+  });
+
+  return ok({
+    message: movedSheets.length + '枚のシートを外部の保管庫スプレッドシートへ移行しました。\n' + movedSheets.join('\n'),
+    movedSheets: movedSheets,
+    archiveUrl: archiveSs.getUrl()
+  });
+}
+
 function archiveOperationLog_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const lock = LockService.getScriptLock();
@@ -662,10 +726,11 @@ function archiveOperationLog_(p) {
       return ok({ message: 'アーカイブ対象はありませんでした', archivedCount: 0 });
     }
 
-    // アーカイブ先シートへ追記（1枚のみ、月ごとに分けない）
-    let archiveSheet = ss.getSheetByName('operationLog_archive');
+    // アーカイブ先シートへ追記（本体には残さず、外部の保管庫スプレッドシートへ書き込む）
+    const archiveSs = getOrCreateArchiveSpreadsheet_();
+    let archiveSheet = archiveSs.getSheetByName('operationLog_archive');
     if (!archiveSheet) {
-      archiveSheet = ss.insertSheet('operationLog_archive');
+      archiveSheet = archiveSs.insertSheet('operationLog_archive');
       archiveSheet.getRange(1, 1, 1, header.length).setValues([header]);
     }
     archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, toArchive.length, header.length).setValues(toArchive);
@@ -674,7 +739,7 @@ function archiveOperationLog_(p) {
     sheet.clearContents();
     sheet.getRange(1, 1, kept.length, header.length).setValues(kept);
 
-    return ok({ message: toArchive.length + '件をoperationLog_archiveへ退避しました', archivedCount: toArchive.length });
+    return ok({ message: toArchive.length + '件を外部の保管庫スプレッドシートへ退避しました（' + archiveSs.getUrl() + '）', archivedCount: toArchive.length });
   } finally {
     lock.releaseLock();
   }
