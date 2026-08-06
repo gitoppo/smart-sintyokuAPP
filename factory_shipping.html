@@ -736,8 +736,9 @@ async function _gasFetch(url, options, retries=2){
   let lastErr;
   for(let i=0; i<=retries; i++){
     const controller = new AbortController();
-    // 25秒応答が無ければ諦めて再試行する（応答が永遠に返らずフリーズするのを防ぐ）
-    const timeoutId = setTimeout(()=>controller.abort(), 25000);
+    // 10秒応答が無ければ諦めて再試行する（応答が永遠に返らずフリーズするのを防ぐ）
+    // ※GAS側のスクリプト自体は実測で常に数秒以内に完了しており、25秒待っても救えるケースが無いことが判明したため短縮
+    const timeoutId = setTimeout(()=>controller.abort(), 10000);
     try{
       const res = await fetch(url, {...options, signal:controller.signal});
       clearTimeout(timeoutId);
@@ -749,7 +750,7 @@ async function _gasFetch(url, options, retries=2){
       return JSON.parse(text);
     }catch(e){
       clearTimeout(timeoutId);
-      lastErr = e.name==='AbortError' ? new Error('GASからの応答がタイムアウトしました（25秒）') : e;
+      lastErr = e.name==='AbortError' ? new Error('GASからの応答がタイムアウトしました（10秒）') : e;
       if(i < retries) await new Promise(r=>setTimeout(r, 800*(i+1))); // 少し待って再試行
     }
   }
@@ -771,84 +772,138 @@ async function gasPost(payload){
   });
 }
 
+// ===== データ読み込み：背景自動リトライまわりの状態管理 =====
+// GASからの応答が届かない（配達失敗）ケースが一定確率で起きることが判明したため、
+// 失敗時は画面をブロックしたまま粘るのではなく、一旦画面は解放し、裏で静かに再試行する。
+let _bgRetryTimer = null;
+let _bgRetryCount = 0;
+const _BG_RETRY_MAX = 5;                 // 背景再試行の最大回数
+const _BG_RETRY_BASE_DELAY = 5000;       // 再試行間隔の基本値（回数に応じて延ばす）
+
+// 入力欄にフォーカスがある、未保存の編集中、箱数チェック中のいずれかなら
+// パレット/バラ/伝票欄をサーバー値で上書きしない（startPolling()と同じ考え方のガード）
+function _workDataSafeToApply(){
+  const focused = document.activeElement;
+  const focusedInInput = focused && (focused.tagName==='INPUT' || focused.tagName==='SELECT' || focused.tagName==='TEXTAREA');
+  return !_localDirty && !_checkActive && !focusedInInput;
+}
+
+// 実際にGASへ問い合わせて画面へ反映する処理本体。
+// 失敗時はここで握りつぶさず例外を投げ、呼び出し元（loadFromGas / 背景リトライ）に判断を委ねる。
+async function _loadFromGasCore(){
+  // 3回に分かれていた通信をGAS側で1回にまとめたエンドポイントを使う（混雑・エラーの軽減のため）
+  const all = await gasGet('getEverything');
+  const data = all, shData = all, msData = all;
+
+  if(data && Array.isArray(data.itemMaster) && data.itemMaster.length > 0){
+    st.itemMaster = data.itemMaster.map(it=>({
+      id:        String(it.id||''),
+      name:      String(it.name||''),
+      color:     String(it.color||''),
+      prePh:     parseFloat(it.prePh)||0,
+      postPh:    parseFloat(it.postPh)||0,
+      sheetNo:   String(it.sheetNo||''),
+      cutW:      String(it.cutW||''),
+      cutL:      String(it.cutL||''),
+      group:     String(it.group||'その他'),
+      price:     parseFloat(it.price)||0,
+      dispName:  String(it.dispName||''),
+      dispColor: String(it.dispColor||''),
+      caseQty:   parseFloat(it.caseQty)||0
+    }));
+  }
+  if(data && data.plans)    st.plans    = data.plans;
+  if(data && data.progress) st.progress = data.progress;
+
+  if(shData){
+    if(shData.deliveryHistory){
+      // GASのデータで常に上書き（全端末で同じ履歴を共有。手入力される場所ではないため上書きしても安全）
+      st.deliveryHistory = shData.deliveryHistory.map(r=>{
+        // palletsJsonにslipsが入っている場合は展開
+        if(!r.slips && r.palletsJson){
+          try{
+            const pw = JSON.parse(r.palletsJson);
+            if(pw.slips) r.slips = pw.slips;
+            if(pw.palletsSnapshot) r.palletsSnapshot = pw.palletsSnapshot;
+          }catch(e){}
+        }
+        if(!r.slips) r.slips = [];
+        return r;
+      });
+    }
+    // ここは①タブで人が直接編集している内容なので、編集中は上書きしない
+    // （背景自動リトライ中に、入力途中のパレット・バラが消えるのを防ぐための唯一かつ最重要のガード）
+    if(shData.workData && shData.workData.updatedAt !== st.lastSyncedWorkAt && _workDataSafeToApply()){
+      if(shData.workData.pallets) st.pallets = shData.workData.pallets;
+      if(shData.workData.bara)    st.bara    = shData.workData.bara;
+      const dateEl = document.getElementById('shippingDate');
+      const noEl   = document.getElementById('deliveryNo');
+      const memoEl = document.getElementById('shippingMemo');
+      if(shData.workData.shippingDate && !dateEl.value) dateEl.value = shData.workData.shippingDate;
+      if(shData.workData.deliveryNo)  noEl.value   = shData.workData.deliveryNo;
+      if(shData.workData.memo)        memoEl.value = shData.workData.memo;
+      st.lastSyncedWorkAt = shData.workData.updatedAt;
+    }
+    saveLocalState();
+  }
+
+  if(msData && msData.ok){
+    st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
+    const serverMovements = msData.movements || [];
+    const serverIds = new Set(serverMovements.map(m=>m.id));
+    // サーバーにまだ無い（未送信の可能性がある）ローカルの記録は消さずに残す
+    const localOnly = st.materialStock.movements.filter(m=>!serverIds.has(m.id));
+    st.materialStock.movements = [...serverMovements, ...localOnly];
+    saveLocalState();
+    if(localOnly.length > 0){
+      // 念のため再送信を試みる（前回の保存が失敗していた場合の保険）
+      for(const m of localOnly){
+        try{ await gasPost({action:'saveMaterialMovement', movement:m}); }catch(e){}
+      }
+      toast(`未送信だった入荷・返品データ${localOnly.length}件を再送信しました`);
+    }
+  }
+  renderItemTiles(); renderPallets(); renderBara(); renderMaterial(); renderHistory();
+  renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
+}
+
+// 起動時・手動リロードボタンから呼ばれる入口。
+// 失敗した場合、ここで諦めるのではなく画面はすぐ解放したうえで裏で自動的に再試行する。
 async function loadFromGas(){
   showLoading(true);
   try{
-    // 3回に分かれていた通信をGAS側で1回にまとめたエンドポイントを使う（混雑・エラーの軽減のため）
-    const all = await gasGet('getEverything');
-    const data = all, shData = all, msData = all;
-
-    if(data && Array.isArray(data.itemMaster) && data.itemMaster.length > 0){
-      st.itemMaster = data.itemMaster.map(it=>({
-        id:        String(it.id||''),
-        name:      String(it.name||''),
-        color:     String(it.color||''),
-        prePh:     parseFloat(it.prePh)||0,
-        postPh:    parseFloat(it.postPh)||0,
-        sheetNo:   String(it.sheetNo||''),
-        cutW:      String(it.cutW||''),
-        cutL:      String(it.cutL||''),
-        group:     String(it.group||'その他'),
-        price:     parseFloat(it.price)||0,
-        dispName:  String(it.dispName||''),
-        dispColor: String(it.dispColor||''),
-        caseQty:   parseFloat(it.caseQty)||0
-      }));
-    }
-    if(data && data.plans)    st.plans    = data.plans;
-    if(data && data.progress) st.progress = data.progress;
-
-    if(shData){
-      if(shData.deliveryHistory){
-        // GASのデータで常に上書き（全端末で同じ履歴を共有）
-        st.deliveryHistory = shData.deliveryHistory.map(r=>{
-          // palletsJsonにslipsが入っている場合は展開
-          if(!r.slips && r.palletsJson){
-            try{
-              const pw = JSON.parse(r.palletsJson);
-              if(pw.slips) r.slips = pw.slips;
-              if(pw.palletsSnapshot) r.palletsSnapshot = pw.palletsSnapshot;
-            }catch(e){}
-          }
-          if(!r.slips) r.slips = [];
-          return r;
-        });
-      }
-      if(shData.workData && shData.workData.updatedAt !== st.lastSyncedWorkAt){
-        if(shData.workData.pallets) st.pallets = shData.workData.pallets;
-        if(shData.workData.bara)    st.bara    = shData.workData.bara;
-        const dateEl = document.getElementById('shippingDate');
-        const noEl   = document.getElementById('deliveryNo');
-        const memoEl = document.getElementById('shippingMemo');
-        if(shData.workData.shippingDate && !dateEl.value) dateEl.value = shData.workData.shippingDate;
-        if(shData.workData.deliveryNo)  noEl.value   = shData.workData.deliveryNo;
-        if(shData.workData.memo)        memoEl.value = shData.workData.memo;
-        st.lastSyncedWorkAt = shData.workData.updatedAt;
-      }
-      saveLocalState();
-    }
-
-    if(msData && msData.ok){
-      st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
-      const serverMovements = msData.movements || [];
-      const serverIds = new Set(serverMovements.map(m=>m.id));
-      // サーバーにまだ無い（未送信の可能性がある）ローカルの記録は消さずに残す
-      const localOnly = st.materialStock.movements.filter(m=>!serverIds.has(m.id));
-      st.materialStock.movements = [...serverMovements, ...localOnly];
-      saveLocalState();
-      if(localOnly.length > 0){
-        // 念のため再送信を試みる（前回の保存が失敗していた場合の保険）
-        for(const m of localOnly){
-          try{ await gasPost({action:'saveMaterialMovement', movement:m}); }catch(e){}
-        }
-        toast(`未送信だった入荷・返品データ${localOnly.length}件を再送信しました`);
-      }
-    }
-    renderItemTiles(); renderPallets(); renderBara(); renderMaterial(); renderHistory();
-    renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
+    await _loadFromGasCore();
     toast('データを読み込みました');
-  }catch(e){ toast('読み込みエラー: '+e.message); }
+    _bgRetryCount = 0;
+    if(_bgRetryTimer){ clearTimeout(_bgRetryTimer); _bgRetryTimer = null; }
+  }catch(e){
+    toast('読み込みエラー: '+e.message+'（自動的に再試行します）');
+    _scheduleBackgroundRetry();
+  }
   finally{ showLoading(false); }
+}
+
+// 画面をブロックしない背景リトライを1回分予約する。
+// 既に予約済み、または規定回数に達していれば何もしない（多重ループの防止）。
+function _scheduleBackgroundRetry(){
+  if(_bgRetryTimer) return;
+  if(_bgRetryCount >= _BG_RETRY_MAX) return;
+  const delay = Math.min(_BG_RETRY_BASE_DELAY * (_bgRetryCount + 1), 30000); // 5秒,10秒,15秒…上限30秒
+  _bgRetryTimer = setTimeout(async () => {
+    _bgRetryTimer = null;
+    _bgRetryCount++;
+    try{
+      await _loadFromGasCore();
+      _bgRetryCount = 0;
+      toast('データの再読み込みに成功しました');
+    }catch(e){
+      if(_bgRetryCount >= _BG_RETRY_MAX){
+        toast('データの自動再読み込みに複数回失敗しました。🔄ボタンで再読み込みしてください');
+      }else{
+        _scheduleBackgroundRetry();
+      }
+    }
+  }, delay);
 }
 
 async function pingGas(){
