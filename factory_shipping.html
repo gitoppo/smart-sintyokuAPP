@@ -549,6 +549,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <button class="btn-warn" onclick="archiveOperationLog()">🗄 古い作業ログをアーカイブ</button>
       <button class="btn-gray" onclick="diagnoseSize()">🔍 データ量を診断</button>
       <button class="btn-gray" onclick="diagnoseAllSheets()">🔍 全シートを診断（現場アプリ側も含む）</button>
+      <button class="btn-danger" onclick="migrateOperationLogArchive()">🗂 古いアーカイブを外部保管庫へ移行</button>
     </div>
   </div>
 </div>
@@ -911,6 +912,26 @@ async function diagnoseAllSheets(){
       `${s.name}：${s.rows}行×${s.cols}列／約${s.approxChars.toLocaleString()}文字${s.sampled?'（概算）':''}／読込${s.readMs}ms`
     ).join('\n');
     alert(`【全シート診断】シート数:${res.sheetCount}　診断全体の所要時間:${res.totalMs}ms\n（文字数の多い順）\n\n${lines}`);
+  }catch(e){
+    showLoading(false);
+    toast('通信エラー: '+e.message);
+  }
+}
+
+// 本体スプレッドシートに残っている古いアーカイブシート（operationLog_archive、plans_archive_*、progress_archive_*）を
+// 外部の保管庫スプレッドシートへ移行し、本体側からは削除する（1回限りの重い処理）
+async function migrateOperationLogArchive(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+  if(!confirm('本体スプレッドシートに残っている古いアーカイブシート（operationLog_archive、plans_archive_*、progress_archive_*）を、\n別の新しいスプレッドシート（保管庫）へ移動します。\n\n・削除ではなく移動なので、後から保管庫側で見返せます\n・件数によっては時間がかかる場合があります\n\n実行しますか？')) return;
+  showLoading(true);
+  try{
+    const res = await gasPost({action:'migrateOperationLogArchive'});
+    showLoading(false);
+    if(res && res.ok){
+      alert(res.message+(res.archiveUrl?'\n\n保管庫スプレッドシート:\n'+res.archiveUrl:''));
+    } else {
+      toast('エラー: '+(res?res.error:'不明なエラー'));
+    }
   }catch(e){
     showLoading(false);
     toast('通信エラー: '+e.message);
