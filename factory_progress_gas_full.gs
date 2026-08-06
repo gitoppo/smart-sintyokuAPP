@@ -9,6 +9,7 @@ function doGet(e) {
     if (action === 'getAll') return getAll_();
     if (action === 'getEverything') return getEverything_();
     if (action === 'diagnoseSize') return diagnoseSize_();
+    if (action === 'diagnoseAllSheets') return diagnoseAllSheets_();
     if (action === 'getShipping') return getShipping_();
     if (action === 'getMaterialStock') return getMaterialStock_();
     return errRes('unknown action: ' + action);
@@ -72,6 +73,50 @@ function diagnoseSize_() {
     result[name] = { exists: true, rows: lastRow, cols: lastCol, approxChars: bytes };
   });
   return ok({ diagnosis: result });
+}
+
+// スプレッドシート内の「すべての」シートを対象に、行数・列数・データ量・実行時間を調べる。
+// 現場アプリ側が使っているシートや、想定していない隠れた肥大化の原因を見つけるための広域診断。
+function diagnoseAllSheets_() {
+  const t0 = new Date().getTime();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ss.getSheets();
+  const result = [];
+  sheets.forEach(function (sheet) {
+    const sheetT0 = new Date().getTime();
+    const name = sheet.getName();
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    let bytes = 0;
+    // セル数が非常に多い場合、値を全部読むこと自体が重いので、上限を設けてサンプリングする
+    const cellCount = lastRow * lastCol;
+    let sampled = false;
+    if (lastRow > 0 && lastCol > 0) {
+      if (cellCount <= 200000) {
+        const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+        values.forEach(function (row) {
+          row.forEach(function (cell) { if (cell) bytes += String(cell).length; });
+        });
+      } else {
+        // 大きすぎる場合は先頭200行だけ読んで、行数から概算する
+        sampled = true;
+        const sampleRows = Math.min(200, lastRow);
+        const values = sheet.getRange(1, 1, sampleRows, lastCol).getValues();
+        let sampleBytes = 0;
+        values.forEach(function (row) {
+          row.forEach(function (cell) { if (cell) sampleBytes += String(cell).length; });
+        });
+        bytes = Math.round(sampleBytes * (lastRow / sampleRows));
+      }
+    }
+    const sheetMs = new Date().getTime() - sheetT0;
+    result.push({
+      name: name, rows: lastRow, cols: lastCol,
+      approxChars: bytes, sampled: sampled, readMs: sheetMs
+    });
+  });
+  const totalMs = new Date().getTime() - t0;
+  return ok({ sheets: result, totalMs: totalMs, sheetCount: sheets.length });
 }
 
 // getAll・getShipping・getMaterialStockの3回の呼び出しを1回にまとめたもの。
