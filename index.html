@@ -2746,19 +2746,28 @@ function saveLocal() {
 const Cloud = {
   async get() {
     if (!gasUrl) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
     try {
-      const r = await fetch(`${gasUrl}?action=getAll&v=${Date.now()}`, { method:'GET', redirect:'follow', cache:'no-store' });
+      const r = await fetch(`${gasUrl}?action=getAll&v=${Date.now()}`, {
+        method:'GET', redirect:'follow', cache:'no-store', signal: controller.signal
+      });
       return await r.json();
-    } catch(e) { return null; }
+    } catch(e) {
+      if (e.name === 'AbortError') console.warn('Cloud.get: タイムアウト（10秒）');
+      return null;
+    } finally { clearTimeout(timer); }
   },
   async post(payload, cb, errCb, _retried) {
     if (!gasUrl) { if (errCb) errCb('No GAS URL'); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
     try {
       const body = JSON.stringify(payload);
       const r = await fetch(`${gasUrl}?v=${Date.now()}`, {
         method:'POST', redirect:'follow', cache:'no-store',
         headers:{ 'Content-Type':'text/plain;charset=UTF-8' },
-        body
+        body, signal: controller.signal
       });
       const d = await r.json();
       if (d.ok && cb) cb(d);
@@ -2766,11 +2775,19 @@ const Cloud = {
         // サーバー混雑（ロックタイムアウト）の場合、1回だけ自動リトライ
         if (!_retried && d.error && String(d.error).includes('lock timeout')) {
           await new Promise(res => setTimeout(res, 1500));
+          clearTimeout(timer);
           return this.post(payload, cb, errCb, true);
         }
         if (errCb) errCb(d.error);
       }
-    } catch(e) { if (errCb) errCb(e.message); }
+    } catch(e) {
+      if (e.name === 'AbortError') {
+        console.warn('Cloud.post: タイムアウト（10秒）', payload.action);
+        if (errCb) errCb('timeout');
+      } else {
+        if (errCb) errCb(e.message);
+      }
+    } finally { clearTimeout(timer); }
   },
   savePlansProgress(cb, errCb) {
     this.post({ action:'savePlansProgress', plans: st.plans, progress: st.progress }, cb, errCb);
@@ -2787,7 +2804,10 @@ const Cloud = {
   },
   saveOperationLog(log) {
     if (!gasUrl) return;
-    this.post({ action:'saveOperationLog', log }, null, null);
+    this.post({ action:'saveOperationLog', log },
+      () => { /* 送信成功：通常は何もしない */ },
+      (err) => { console.warn('operationLog送信失敗:', err, log); }
+    );
   },
   saveStock(cb, errCb, deletedIds) {
     const payload = { action:'saveStock', stock: st.stock };
@@ -2882,12 +2902,14 @@ function applyCloudData(json, forceShiftAttend) {
     }
   }
   if (json.stock && typeof json.stock === 'object') {
+    // ストック入力欄にフォーカス中、または未送信データがある場合は自端末の今日分を必ず保護
     const dn = st.deviceName;
     const today = todayStr();
     const localStock = st.stock || {};
     const hasLocalStock = Object.keys(localStock).length > 0;
+    const stockInputFocused = !!(document.activeElement && document.activeElement.classList.contains('stock-num-input'));
+
     // 削除済みitemId：ローカルにデータがある状態でクラウドにあってローカルにないもの
-    // ※ローカルが空（初回ロード等）の場合は削除済み判定しない
     const localDeletedIds = new Set();
     if (hasLocalStock) {
       Object.keys(json.stock).forEach(itemId => {
@@ -2896,7 +2918,7 @@ function applyCloudData(json, forceShiftAttend) {
         }
       });
     }
-    // 自端末の今日分を退避
+    // 自端末の今日分を退避（入力中・未送信に関わらず常に保護）
     const myLocal = {};
     Object.entries(localStock).forEach(([itemId, entry]) => {
       if (dn && entry && typeof entry === 'object') {
@@ -2904,18 +2926,22 @@ function applyCloudData(json, forceShiftAttend) {
         if (dayKey in entry) myLocal[itemId] = toNum(entry[dayKey]);
       }
     });
-    st.stock = {};
-    Object.entries(json.stock).forEach(([itemId, entry]) => {
-      if (localDeletedIds.has(itemId)) return;
-      st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
-    });
-    // 自端末の今日分を復元（ローカル優先）
-    if (dn) {
-      const dayKey = dn + '_' + today;
-      Object.entries(myLocal).forEach(([itemId, localVal]) => {
-        if (!st.stock[itemId]) st.stock[itemId] = {};
-        st.stock[itemId][dayKey] = localVal;
+
+    // 入力欄にフォーカス中はst.stock自体を更新しない（描画も止まる）
+    if (!stockInputFocused) {
+      st.stock = {};
+      Object.entries(json.stock).forEach(([itemId, entry]) => {
+        if (localDeletedIds.has(itemId)) return;
+        st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
       });
+      // 自端末の今日分を復元（ローカル優先）
+      if (dn) {
+        const dayKey = dn + '_' + today;
+        Object.entries(myLocal).forEach(([itemId, localVal]) => {
+          if (!st.stock[itemId]) st.stock[itemId] = {};
+          st.stock[itemId][dayKey] = localVal;
+        });
+      }
     }
   }
 }
@@ -3044,7 +3070,7 @@ async function pullFromCloud() {
   saveLocal();
   renderAll();
   showSyncStatus('☁️ クラウドから読み込み完了', true);
-  updateSyncBar('ok');
+  updateSyncBar(_unsavedChanges ? 'unsaved' : 'ok');
 }
 
 // ============================================================
@@ -3088,10 +3114,14 @@ async function manualSync() {
   try {
     const json = await Cloud.get();
     if (!json || !json.ok) { updateSyncBar('error'); return; }
-    applyCloudData(json, true);
+    // 未送信データがある場合はstock・progressを保護しつつ反映
+    if (_unsavedChanges) {
+      showToast('⚠️ 未送信データを保護して同期しました');
+    }
+    applyCloudData(json, !_unsavedChanges);
     saveLocal();
     renderAll();
-    updateSyncBar('ok');
+    updateSyncBar(_unsavedChanges ? 'unsaved' : 'ok');
   } catch(e) {
     updateSyncBar('error');
   } finally {
@@ -3102,15 +3132,70 @@ async function manualSync() {
 // ポーリング
 let _cloudSaveTimer = null;
 let _unsavedChanges = false; // 未送信フラグ
+let _unsavedSince = null;    // 未送信になった時刻
+let _unsavedAlertTimer = null; // 未送信アラートタイマー
 
-function markUnsaved() { _unsavedChanges = true; updateSyncBar('unsaved'); }
-function markSaved()   { _unsavedChanges = false; updateSyncBar('ok'); }
+function markUnsaved() {
+  if (!_unsavedChanges) {
+    _unsavedChanges = true;
+    _unsavedSince = Date.now();
+    // 30秒経っても未送信なら目立つアラートを表示
+    _unsavedAlertTimer = setTimeout(() => {
+      if (_unsavedChanges) {
+        const el = document.getElementById('sync-bar-time');
+        if (el) {
+          el.style.animation = 'none';
+          el.style.background = '#7f1d1d';
+          el.style.color = '#fca5a5';
+          el.style.padding = '4px 8px';
+          el.style.borderRadius = '4px';
+          el.style.fontWeight = '700';
+          el.textContent = '❌ 未送信データあり！手動更新ボタンを押してください';
+        }
+        showToast('⚠️ データが長時間送信されていません。「🔄 今すぐ更新」を押してください。');
+      }
+    }, 30000);
+  }
+  updateSyncBar('unsaved');
+}
+
+function markSaved() {
+  _unsavedChanges = false;
+  _unsavedSince = null;
+  clearTimeout(_unsavedAlertTimer);
+  _unsavedAlertTimer = null;
+  // アラート表示をリセット
+  const el = document.getElementById('sync-bar-time');
+  if (el) { el.style.background = ''; el.style.padding = ''; el.style.borderRadius = ''; el.style.fontWeight = ''; }
+  updateSyncBar('ok');
+}
 
 // ページを閉じる前に未送信データがあれば警告
 window.addEventListener('beforeunload', e => {
   if (_unsavedChanges) {
     e.preventDefault();
     e.returnValue = '未送信のデータがあります。このまま閉じると入力内容が失われる可能性があります。';
+  }
+});
+
+// タブが非アクティブになる瞬間にも未送信チェック
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && _unsavedChanges) {
+    // タブが隠れる際に即時保存を試みる（sendBeaconは使わずfetchで試行）
+    console.warn('visibilitychange: 未送信データあり・バックグラウンド移行');
+    // debouncedCloudSaveのタイマーを即時実行
+    clearTimeout(_cloudSaveTimer);
+    if (gasUrl && st.deviceName) {
+      const dn = st.deviceName;
+      const today = todayStr();
+      const payload = { action:'savePlansProgress', plans: st.plans, progress: st.progress };
+      // keepaliveオプションでバックグラウンドでも送信を試みる
+      fetch(`${gasUrl}?v=${Date.now()}`, {
+        method:'POST', redirect:'follow', cache:'no-store', keepalive: true,
+        headers:{ 'Content-Type':'text/plain;charset=UTF-8' },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+    }
   }
 });
 
