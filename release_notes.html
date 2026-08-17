@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>出荷管理アプリ リリースノート</title>
+<style>
+  :root{
+    --navy:#0f3460;
+    --navy-dark:#0a2647;
+    --orange:#e67e22;
+    --purple:#8e44ad;
+    --green:#1e8e5a;
+    --red:#e94560;
+    --bg:#f7f8fb;
+    --card:#ffffff;
+    --line:#e3e6ee;
+    --text:#232a3b;
+    --sub:#6b7386;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Hiragino Sans','Noto Sans JP','Yu Gothic',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.75;
+    -webkit-text-size-adjust:100%;
+  }
+  a{color:var(--navy);}
+
+  header{
+    background:linear-gradient(135deg,var(--navy-dark),var(--navy) 70%);
+    color:#fff;
+    padding:28px 20px 60px;
+    position:relative;
+    overflow:hidden;
+  }
+  header::after{
+    content:"";
+    position:absolute; right:-40px; bottom:-60px;
+    width:220px; height:220px; border-radius:50%;
+    background:rgba(230,126,34,0.18);
+  }
+  header .eyebrow{
+    font-size:12px; letter-spacing:0.14em; font-weight:700;
+    color:#ffb46b; text-transform:uppercase;
+  }
+  header h1{
+    margin:8px 0 6px; font-size:24px; font-weight:800; letter-spacing:0.02em;
+    position:relative; z-index:1;
+  }
+  header p{margin:0; font-size:13.5px; color:#c9d4e8; position:relative; z-index:1;}
+
+  #layout{
+    max-width:820px; margin:-30px auto 60px; padding:0 16px;
+    position:relative; z-index:2;
+  }
+
+  .version{
+    background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:20px 22px; margin-bottom:20px; box-shadow:0 6px 20px rgba(15,52,96,0.06);
+  }
+  .version h2{
+    margin:0 0 4px; font-size:18px; font-weight:800; color:var(--navy);
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .version .date{font-size:12.5px; color:var(--sub); font-weight:600;}
+  .version .tag{
+    display:inline-block; font-size:11px; font-weight:700; padding:2px 9px;
+    border-radius:20px; color:#fff;
+  }
+  .tag.fix{background:var(--red);}
+  .tag.improve{background:var(--orange);}
+  .tag.new{background:var(--green);}
+  .tag.note{background:var(--purple);}
+
+  .version ul{margin:14px 0 0; padding-left:20px;}
+  .version li{margin-bottom:10px; font-size:14.5px;}
+  .version li b{color:var(--navy);}
+  .version .desc{
+    display:block; font-size:12.5px; color:var(--sub); margin-top:2px;
+  }
+
+  .divider{
+    text-align:center; font-size:12px; color:var(--sub); margin:30px 0 18px;
+    font-weight:700; letter-spacing:0.05em;
+  }
+
+  .callout{
+    background:#fff7ec; border:1px solid #f3d9b3; border-radius:12px;
+    padding:14px 16px; font-size:13.5px; color:#8a5a1a; margin:14px 0 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Shipping App</div>
+  <h1>📦 出荷管理アプリ リリースノート</h1>
+  <p>factory_shipping.html の更新履歴です。上ほど新しい更新です。</p>
+</header>
+
+<div id="layout">
+
+  <div class="version">
+    <h2>🔄 更新 <span class="tag fix">不具合対応</span></h2>
+    <div class="date">2026年8月6日</div>
+    <p style="font-size:13.5px;color:var(--sub);margin:8px 0 0;">
+      「データ読み込みが固まる／タイムアウト表示が出る」という報告を受けての対応です。
+      根本原因はGoogle側の仕組みに起因するもので、アプリ側だけでは完全には解消できませんが、
+      現場での使い勝手が悪くならないよう、以下の対策を行いました。
+    </p>
+    <ul>
+      <li>
+        <b>読み込みが固まる時間を短縮</b>
+        <span class="desc">これまで「応答が無い」と判断するまで最大25秒待っていましたが、10秒に短縮しました。実際の処理は通常数秒で終わっているため、待ち時間を減らしても支障はありません。</span>
+      </li>
+      <li>
+        <b>読み込み失敗時、画面が固まらないように変更</b>
+        <span class="desc">これまでは失敗するとエラー表示で止まっていましたが、今後はエラーを出しつつ、裏側で自動的に再読み込みを試みます（数秒〜数十秒おきに最大5回）。作業の手を止める必要はありません。</span>
+      </li>
+      <li>
+        <b>再読み込み中でも、入力中のデータは消えないよう保護</b>
+        <span class="desc">①タブでパレット・バラを入力している最中や、箱数チェック中は、裏側の自動再読み込みによって画面の内容が上書きされないようにしました。安心して入力を続けられます。</span>
+      </li>
+    </ul>
+    <div class="callout">
+      💡 それでも「読み込みエラー」の表示が何度も出る場合は、Googleサーバー側の一時的な不調の可能性があります。焦らず少し待ってから🔄「データ再読み込み」ボタンを押してください。
+    </div>
+  </div>
+
+  <div class="divider">─── ここから過去の更新（参考） ───</div>
+
+  <div class="version">
+    <h2>📦 ①パレット＆印刷タブ <span class="tag improve">機能追加</span></h2>
+    <div class="date">〜2026年8月上旬</div>
+    <ul>
+      <li><b>誤って消してしまっても「元に戻す」ボタンで復元可能に</b>
+        <span class="desc">パレット・品目・バラを削除してから8秒間、Undoボタンが表示されます（直前の1手のみ）。</span></li>
+      <li><b>箱数チェックがリロードしても消えなくなりました</b>
+        <span class="desc">端末ごとの保存のため、チェックと印刷は同じ端末で行ってください。</span></li>
+      <li><b>バラに「積み先」欄を追加</b>
+        <span class="desc">入力すると、チェックリスト印刷時に積み先ごとへ自動で分かれます。</span></li>
+      <li><b>バラに「注文番号」欄を追加</b>
+        <span class="desc">同じ品目・カラーでも、納品書では別行として印字されます。</span></li>
+      <li><b>補修分・貼り直し分は自動で別伝票に</b>
+        <span class="desc">備考欄に補修キーワードが入っていると、通常納品分と別の伝票として発行されます。</span></li>
+      <li><b>「☑️ パレット選択印刷」ボタンを新設</b>
+        <span class="desc">印刷したいパレット・バラだけを個別に選んで印刷できます。</span></li>
+      <li><b>チェックリスト印刷を「1パレット＝1ページ」に変更</b>
+        <span class="desc">印刷が見切れる問題への対策です。左が本体、右が控えになります。</span></li>
+    </ul>
+  </div>
+
+  <div class="version">
+    <h2>📄 ③出荷履歴タブ <span class="tag new">新機能</span></h2>
+    <ul>
+      <li><b>「↩️ ①タブへ復元」ボタン</b>
+        <span class="desc">チェックリスト発行時点のパレット内容を、①タブへ緊急復旧できます。</span></li>
+      <li><b>複数の納品書をまとめて1つのPDFに保存可能に</b>
+        <span class="desc">チェックボックスで選んだ納品書を、1回の印刷でまとめて出力できます。</span></li>
+    </ul>
+  </div>
+
+  <div class="version">
+    <h2>🧱 ⑤材料在庫タブ <span class="tag improve">改善</span></h2>
+    <ul>
+      <li><b>印刷時に前日・出荷日・出荷数・返品数を並べて確認できるように</b>
+        <span class="desc">入荷・返品の入力漏れに気づきやすくなりました。</span></li>
+    </ul>
+  </div>
+
+  <div class="version">
+    <h2>📖 取扱説明書 <span class="tag new">新規作成</span></h2>
+    <ul>
+      <li><b>manual.html を新規作成</b>
+        <span class="desc">①〜⑤・⚙️設定タブの全機能を網羅。検索ボックス・目次つき。⚙️設定タブからリンクしています。</span></li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>
