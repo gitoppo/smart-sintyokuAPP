@@ -62,6 +62,7 @@
     <li><a href="#settings">⚙️設定タブ</a></li>
     <li><a href="#qa">トラブルシューティング Q&amp;A</a></li>
     <li><a href="#admin">管理者向け復旧手順</a></li>
+    <li><a href="#sheets">スプレッドシート シート構成</a></li>
     <li><a href="#history">更新履歴</a></li>
   </ul>
 </div>
@@ -93,11 +94,14 @@
   <tr><th>表示</th><th>意味</th></tr>
   <tr><td>⚠️ 未送信のデータあり（送信中...）</td><td>入力後、クラウドへ送信中</td></tr>
   <tr><td>✅ 最終同期: HH:MM:SS</td><td>正常に同期完了</td></tr>
-  <tr><td>❌ 同期失敗（最終成功: HH:MM:SS）</td><td>通信エラーが発生</td></tr>
+  <tr><td>❌ 同期失敗（最終成功: HH:MM:SS）</td><td>通信エラーまたはタイムアウト（10秒）が発生</td></tr>
   <tr><td>🔄 同期中...</td><td>手動更新または自動ポーリング中</td></tr>
+  <tr><td style="background:#7f1d1d;color:#fca5a5;font-weight:700">❌ 未送信データあり！手動更新ボタンを押してください</td><td>30秒以上未送信が続いている（要対応）</td></tr>
 </table>
 <p>「🔄 今すぐ更新」ボタンを押すと手動で最新データを取得します。</p>
 <div class="warn">画面を閉じる前に必ず「✅」を確認してください。送信完了前に閉じると入力内容が失われる可能性があります。閉じようとすると警告ダイアログが表示されます。</div>
+<div class="note">通信は10秒でタイムアウトします。タイムアウト時は「❌ 同期失敗」と表示されます。「🔄 今すぐ更新」を押して再試行してください。</div>
+<div class="note">タブを切り替えたり他のアプリに移動する際も未送信データがあれば自動的に送信を試みます。</div>
 
 <h2 id="tab1">①進捗タブ</h2>
 <p>全端末の生産進捗を一覧で確認するタブです。</p>
@@ -284,6 +288,69 @@
 </ol>
 <div class="warn">保存せずにデプロイしても古いコードのままになります。必ずCtrl+Sで保存してからデプロイしてください。</div>
 
+<h2 id="sheets">スプレッドシート シート構成</h2>
+<p>スプレッドシートには以下のシートがあります。進捗の食い違いが起きた場合などに直接確認・修正する際の参考にしてください。</p>
+
+<h3>シート一覧</h3>
+<table>
+  <tr><th>シート名</th><th>用途</th><th>使用アプリ</th></tr>
+  <tr><td>itemMaster</td><td>品目マスター</td><td>現場・事務共用</td></tr>
+  <tr><td>plans</td><td>生産計画</td><td>現場アプリ</td></tr>
+  <tr><td>progress</td><td>進捗データ</td><td>現場アプリ</td></tr>
+  <tr><td>stock</td><td>ストックデータ</td><td>現場アプリ</td></tr>
+  <tr><td>shiftAttendance</td><td>シフト・勤怠</td><td>現場アプリ</td></tr>
+  <tr><td>operationLog</td><td>操作ログ</td><td>現場アプリ</td></tr>
+  <tr><td>deliveryHistory</td><td>出荷履歴</td><td>事務アプリ</td></tr>
+  <tr><td>shippingWork</td><td>出荷作業中データ（一時保存）</td><td>事務アプリ</td></tr>
+  <tr><td>materialStockSettings</td><td>材料在庫設定</td><td>事務アプリ</td></tr>
+  <tr><td>materialMovements</td><td>材料入出庫履歴</td><td>事務アプリ</td></tr>
+  <tr><td>plans_archive_YYYY-MM</td><td>生産計画アーカイブ（月次自動退避）</td><td>自動生成</td></tr>
+  <tr><td>progress_archive_YYYY-MM</td><td>進捗データアーカイブ（月次自動退避）</td><td>自動生成</td></tr>
+  <tr><td>operationLog_archive</td><td>操作ログアーカイブ（当月より前を自動退避）</td><td>自動生成</td></tr>
+</table>
+
+<h3>plansシート（生産計画）</h3>
+<table>
+  <tr><th>列</th><th>内容</th><th>例</th></tr>
+  <tr><td>A列（id）</td><td>計画ID</td><td>pmr1y9vna4u7x</td></tr>
+  <tr><td>B列（date）</td><td>納期（YYYY-MM-DD）</td><td>2026-08-05</td></tr>
+  <tr><td>C列（itemId）</td><td>品目ID（itemMasterと紐付け）</td><td>itmr1y93581msg</td></tr>
+  <tr><td>D列（qty）</td><td>計画数量</td><td>15</td></tr>
+  <tr><td>E列（memo）</td><td>メモ</td><td>（空）</td></tr>
+  <tr><td>F列（priority）</td><td>優先フラグ</td><td>TRUE / FALSE</td></tr>
+</table>
+
+<h3>progressシート（進捗データ）</h3>
+<table>
+  <tr><th>列</th><th>内容</th><th>例</th></tr>
+  <tr><td>A列（planId）</td><td>計画ID（plansのidと紐付け）</td><td>pmr1y9vna4u7x</td></tr>
+  <tr><td>B列（preDone）</td><td>前工程完了数</td><td>0</td></tr>
+  <tr><td>C列（postDone）</td><td>後工程進捗（JSON形式）</td><td>{"神崎_2026-08-05":25,"伊藤_2026-08-05":10}</td></tr>
+</table>
+<div class="note">progressのplanIdから品目名・カラーを調べるには、同じplanIdをplansシートで検索→C列のitemIdをitemMasterシートのJSONで検索してください。operationLogシートにはD列（品目名）・E列（カラー）が直接記録されているので、operationLogで検索する方が早い場合があります。</div>
+
+<h3>operationLogシート（操作ログ）</h3>
+<table>
+  <tr><th>列</th><th>内容</th><th>例</th></tr>
+  <tr><td>A列（timestamp）</td><td>操作日時</td><td>2026/8/5 15:57:45</td></tr>
+  <tr><td>B列（deviceName）</td><td>端末名</td><td>伊藤</td></tr>
+  <tr><td>C列（planId）</td><td>計画ID</td><td>pmr1y9vna4u7x</td></tr>
+  <tr><td>D列（itemName）</td><td>品目名</td><td>DB共通前扉</td></tr>
+  <tr><td>E列（color）</td><td>カラー</td><td>マットホワイト</td></tr>
+  <tr><td>F列（proc）</td><td>工程</td><td>post（後工程）</td></tr>
+  <tr><td>G列（prevVal）</td><td>変更前の値</td><td>4</td></tr>
+  <tr><td>H列（newVal）</td><td>変更後の値</td><td>5</td></tr>
+</table>
+<div class="note">進捗の食い違いが起きた場合は、operationLogシートで端末名・品目名を検索すると最後に入力された値と時刻を確認できます。保持期間は当月のみ（当月より前はoperationLog_archiveシートに退避）。</div>
+
+<h3>stockシート（ストックデータ）</h3>
+<table>
+  <tr><th>列</th><th>内容</th><th>例</th></tr>
+  <tr><td>A列（itemId）</td><td>品目ID（itemMasterと紐付け）</td><td>itmr1y93581msg</td></tr>
+  <tr><td>B列（entry）</td><td>端末別入力データ（JSON形式）</td><td>{"森本_2026-08-05":25}</td></tr>
+</table>
+<div class="warn">B列が数値（0など）になっている行は旧形式のデータです。アプリからストックを入力し直すと新形式（JSON）で上書きされます。</div>
+
 <h2 id="history">更新履歴</h2>
 <table>
   <tr><th>バージョン</th><th>日付</th><th>主な変更内容</th></tr>
@@ -291,6 +358,7 @@
   <tr><td><span class="version-tag">v1.1</span></td><td>2026/6/30</td><td>タイルに残数表示・計画タブCSV完全置換化・バックアップ機能・ストックタブ追加・同期バー追加</td></tr>
   <tr><td><span class="version-tag">v1.2</span></td><td>2026/7/2</td><td>完了ロック機能・未送信警告・カラー単位削除・端末別ストック管理・④⑤タブ入力保護</td></tr>
   <tr><td><span class="version-tag">v1.3</span></td><td>2026/7/2</td><td>ストック→②個人タブへの一括転記機能・転記レポート印刷・⚙️設定タブに取説リンク追加</td></tr>
+  <tr><td><span class="version-tag">v1.4</span></td><td>2026/8/16</td><td>通信タイムアウト処理（10秒）追加・30秒未送信で目立つアラート表示・タブ切り替え時の自動送信・スプレッドシート解説を管理者向けセクションに追加</td></tr>
 </table>
 
 </div>
