@@ -328,53 +328,25 @@ function saveAll_(p) {
 }
 
 // ============================================================
-// stock（ストックタブ：端末別管理）
+// stock（ストックタブ：計画とは独立した品目別ストック数量）
 // ============================================================
 function saveStock_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    lock.waitLock(10000); // 最大10秒待機
   } catch (e) {
     return errRes('サーバー混雑中です。少し待って再試行してください（lock timeout）');
   }
   try {
-    const current = readStockSheet_(ss);
-    const incoming = p.stock || {};
-    const isDelete = p.isDelete || false;
-
-    if (isDelete) {
-      // 削除操作：送信されてきたitemIdのキーをクラウドから削除
-      const deletedIds = p.deletedIds || [];
-      deletedIds.forEach(function(itemId) {
-        delete current[itemId];
-      });
-      // 残りのitemIdはマージ
-      Object.keys(incoming).forEach(function(itemId) {
-        var entry = incoming[itemId] || {};
-        if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
-        Object.keys(entry).forEach(function(deviceDateKey) {
-          current[itemId][deviceDateKey] = entry[deviceDateKey];
-        });
-      });
-    } else {
-      // 通常の入力：マージ保存
-      Object.keys(incoming).forEach(function(itemId) {
-        var entry = incoming[itemId] || {};
-        if (!current[itemId] || typeof current[itemId] !== 'object') current[itemId] = {};
-        Object.keys(entry).forEach(function(deviceDateKey) {
-          current[itemId][deviceDateKey] = entry[deviceDateKey];
-        });
-      });
-    }
-    writeStockSheet_(ss, current);
+    writeStockSheet_(ss, p.stock || {});
     return ok({});
   } finally {
     lock.releaseLock();
   }
 }
 
-// stockシート: itemId, entry(JSON)
+// stockシート: itemId,qty
 function readStockSheet_(ss) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) return {};
@@ -384,18 +356,7 @@ function readStockSheet_(ss) {
   for (var i = 1; i < data.length; i++) {
     var r = data[i];
     if (!r[0]) continue;
-    var val = r[1];
-    if (val === '' || val === null || val === undefined) {
-      result[String(r[0])] = {};
-    } else if (typeof val === 'object') {
-      result[String(r[0])] = {};
-    } else if (typeof val === 'number') {
-      // 旧形式（数値）は空オブジェクトとして扱う
-      result[String(r[0])] = {};
-    } else {
-      try { result[String(r[0])] = JSON.parse(String(val)); }
-      catch(e) { result[String(r[0])] = {}; }
-    }
+    result[String(r[0])] = Number(r[1] || 0);
   }
   return result;
 }
@@ -404,9 +365,9 @@ function writeStockSheet_(ss, stock) {
   var sheet = ss.getSheetByName('stock');
   if (!sheet) sheet = ss.insertSheet('stock');
   sheet.clearContents();
-  var rows = [['itemId', 'entry']];
+  var rows = [['itemId','qty']];
   Object.keys(stock).forEach(function(itemId) {
-    rows.push([itemId, JSON.stringify(stock[itemId] || {})]);
+    rows.push([itemId, stock[itemId]]);
   });
   sheet.getRange(1, 1, rows.length, 2).setValues(rows);
 }
@@ -820,8 +781,14 @@ function saveMaterialMovement_(p) {
   try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
   try {
     const movements = readJsonSheet_(ss, 'materialMovements');
-    movements.push(p.movement);
-    writeJsonSheet_(ss, 'materialMovements', movements);
+    // 同じidが既に存在する場合は追加しない
+    // （応答の配達失敗による自動リトライや、反応が無く見えた際のユーザーの再送信で、
+    //  同一内容が何度もpushされて重複登録されてしまう問題への対策）
+    const exists = movements.some(function (m) { return m.id === p.movement.id; });
+    if (!exists) {
+      movements.push(p.movement);
+      writeJsonSheet_(ss, 'materialMovements', movements);
+    }
     return ok({ message: '保存しました' });
   } finally {
     lock.releaseLock();
