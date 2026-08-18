@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スマート管理 リリースノート</title>
+<style>
+  :root {
+    --bg: #0d1520; --card: #111e2e; --border: #1e3a5f;
+    --text: #e2e8f0; --muted: #64748b; --g: #4ade80;
+    --b: #38bdf8; --y: #fbbf24; --r: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: sans-serif; font-size: 14px; line-height: 1.7; }
+  .container { max-width: 800px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; font-weight: 700; padding: 20px 0 8px; border-bottom: 2px solid var(--border); margin-bottom: 16px; }
+  h1 span { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .version-block { background: var(--card); border-radius: 10px; padding: 18px 20px; margin-bottom: 20px; border: 1px solid var(--border); }
+  .version-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .version-tag { background: var(--border); color: var(--b); padding: 3px 10px; border-radius: 4px; font-size: 13px; font-weight: 700; }
+  .version-date { font-size: 13px; color: var(--muted); }
+  .section-title { font-size: 13px; font-weight: 700; margin: 12px 0 6px; }
+  .section-title.new { color: var(--g); }
+  .section-title.fix { color: var(--y); }
+  .section-title.doc { color: var(--b); }
+  ul { margin: 0 0 8px 18px; }
+  li { margin-bottom: 4px; font-size: 13px; }
+  li strong { color: var(--text); }
+  .note { background: #0c2a35; border: 1px solid #0891b2; border-radius: 6px; padding: 8px 12px; margin: 10px 0; font-size: 12px; }
+  .note::before { content: 'ℹ️ '; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+  th { background: var(--border); padding: 8px 10px; text-align: left; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .back-to-top { position: fixed; bottom: 20px; right: 20px; background: var(--border); color: var(--b); border: none; border-radius: 50%; width: 44px; height: 44px; font-size: 20px; cursor: pointer; }
+  .manual-link { display: inline-block; margin-bottom: 20px; padding: 10px 18px; background: var(--card); border: 1px solid var(--b); border-radius: 6px; color: var(--b); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .manual-link:hover { background: #0c2a35; }
+  .tech-table td:first-child { color: var(--muted); width: 140px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>スマート管理 リリースノート <span>現場アプリ（index.html）</span></h1>
+
+<a href="https://gitoppo.github.io/smart-sintyokuAPP/manual_field.html" class="manual-link" target="_blank">📖 取扱説明書を開く</a>
+
+<!-- v1.4.0 -->
+<div class="version-block">
+  <div class="version-header">
+    <span class="version-tag">v1.4.0</span>
+    <span class="version-date">2026年8月16日</span>
+  </div>
+  <div class="section-title fix">🔧 バグ修正・安定性向上</div>
+  <ul>
+    <li><strong>通信タイムアウト処理の追加：</strong>Cloud.get・Cloud.postにAbortControllerによる10秒タイムアウトを実装。タイムアウト時は「❌ 同期失敗」として明示的にエラー表示（以前は無期限に保留状態になり現場が気づけない問題があった）</li>
+    <li><strong>未送信アラートの強化：</strong>入力後30秒以上送信されない場合、同期バーが赤背景・太字に変化し「❌ 未送信データあり！手動更新ボタンを押してください」と表示。トースト通知も同時に表示</li>
+    <li><strong>タブ切り替え時の自動送信（visibilitychange対応）：</strong>タブを非アクティブにする瞬間に未送信データがあれば自動的にバックグラウンド送信を試みる</li>
+    <li><strong>operationLogの送信成否記録：</strong>操作ログの送信失敗時にブラウザのコンソールにエラーを記録。進捗の食い違い発生時の原因追跡精度が向上</li>
+  </ul>
+  <div class="section-title doc">📖 ドキュメント</div>
+  <ul>
+    <li>取説（manual_field.html）にスプレッドシート シート構成解説を追加（管理者向けセクション）</li>
+    <li>plans・progress・operationLog・stockシートの列説明を収録</li>
+  </ul>
+</div>
+
+<!-- v1.3.0 -->
+<div class="version-block">
+  <div class="version-header">
+    <span class="version-tag">v1.3.0</span>
+    <span class="version-date">2026年7月2日</span>
+  </div>
+  <div class="section-title new">✨ 新機能</div>
+  <ul>
+    <li><strong>📦ストック → ②個人タブへの一括転記：</strong>「📋 ②個人タブへ転記」ボタンを追加。本番CSVインポート後にワンタップで全端末のストック累計を②個人タブの進捗に反映。転記レポートを印刷ダイアログで出力（PDF保存推奨）。転記済み品目はストックから自動削除、計画にない品目はストックに残る</li>
+    <li><strong>カラー単位のストック削除：</strong>ボトムシートの各カラー行に🗑ボタンを追加。グループ単位削除とカラー単位削除の2段階で管理可能に</li>
+    <li><strong>⚙️設定タブに取説リンク追加：</strong>「📖 取扱説明書を開く」ボタンでmanual_field.htmlを直接開ける</li>
+  </ul>
+  <div class="section-title fix">🔧 バグ修正</div>
+  <ul>
+    <li><strong>ストック削除がポーリングで復活する問題を修正：</strong>削除操作を即時クラウド送信に変更。GAS側に削除フラグ対応を追加</li>
+    <li><strong>ストック入力中のポーリング上書き問題を修正：</strong>ストック入力欄にフォーカス中はクラウドデータでの上書きをスキップ</li>
+  </ul>
+</div>
+
+<!-- v1.2.0 -->
+<div class="version-block">
+  <div class="version-header">
+    <span class="version-tag">v1.2.0</span>
+    <span class="version-date">2026年7月2日</span>
+  </div>
+  <div class="section-title new">✨ 新機能</div>
+  <ul>
+    <li><strong>②個人タブ：完了ロック機能：</strong>全端末合計が予定数に達したカラー行をグレーアウトし±ボタンをdisabledに</li>
+    <li><strong>未送信警告（beforeunload）：</strong>送信完了前に画面を閉じようとすると警告ダイアログを表示</li>
+    <li><strong>📦ストックタブ：端末別管理：</strong>自分の今日の入力欄・全端末合計・自分累計を表示</li>
+    <li><strong>④⑤タブ入力中のポーリングスキップ：</strong>④勤怠・⑤シフトタブが開いている間はポーリングによる画面更新をスキップ</li>
+  </ul>
+  <div class="section-title fix">🔧 バグ修正</div>
+  <ul>
+    <li><strong>計画の削除・編集を即時クラウド保存に変更：</strong>ポーリングによる復活問題を解消</li>
+    <li><strong>caseQtyのポーリング上書き問題を修正：</strong>applyCloudDataのitemMaster反映処理にcaseQtyを追加</li>
+  </ul>
+</div>
+
+<!-- v1.1.0 -->
+<div class="version-block">
+  <div class="version-header">
+    <span class="version-tag">v1.1.0</span>
+    <span class="version-date">2026年6月30日</span>
+  </div>
+  <div class="section-title new">✨ 新機能</div>
+  <ul>
+    <li><strong>タイルに残数表示・横3列レイアウト：</strong>①②タブのタイルに「予定・進捗・残」を横3列で表示。3桁以上の数字は長体表示</li>
+    <li><strong>同期バー（全タブ共通・常時表示）：</strong>ナビバー直下に最終同期時刻を常時表示。「🔄 今すぐ更新」ボタンで手動同期</li>
+    <li><strong>📦ストックタブ（新規）：</strong>本番計画確定前の先行生産分を記録する独立タブ。品目選択ピッカー・グループ単位削除機能を実装</li>
+    <li><strong>③計画タブ：CSVインポートの完全置換化：</strong>完全置換方式に統一。インポート前に自動バックアップ、「↩️ 直前に戻す」ボタンで復元可能。「全計画リセット」「完了済み一括削除」ボタンを廃止</li>
+  </ul>
+  <div class="section-title fix">🔧 バグ修正・安定性向上</div>
+  <ul>
+    <li><strong>GASにLockServiceによる排他制御を追加：</strong>複数端末同時書き込みによるデータ上書き事故を防止</li>
+    <li><strong>Cloud.postのリトライ機能追加：</strong>ロック競合エラー時に1.5秒待機して1回自動リトライ</li>
+    <li><strong>並び順の統一：</strong>buildPreGroups()をst.itemMaster順に統一</li>
+  </ul>
+</div>
+
+<!-- v1.0.0 -->
+<div class="version-block">
+  <div class="version-header">
+    <span class="version-tag">v1.0.0</span>
+    <span class="version-date">2026年6月27日</span>
+  </div>
+  <div class="section-title new">🎉 初版リリース</div>
+  <ul>
+    <li>本番アプリ（sintyokuAPP）をベースに現場の声を反映してシンプル化・UI刷新</li>
+    <li>①進捗・②個人・③計画タブをタイル＋ボトムシートUIに刷新</li>
+    <li>アラートバーを後工程ベース計算に変更（前工程非表示）</li>
+    <li>localStorageキーをスマート版専用に分離（appState_smart_v1等）</li>
+    <li>進捗データ保護：自端末の今日分は常にローカル優先</li>
+    <li>計画操作を即時クラウド保存に変更（ポーリング競合解消）</li>
+    <li>⚙️設定タブに「📊 端末別進捗レポート」ボタンを追加</li>
+    <li>GAS：writeProgressSheet_に旧キー自動クリーンアップを追加</li>
+  </ul>
+</div>
+
+<!-- 技術スタック -->
+<div class="version-block">
+  <div class="version-header">
+    <span class="version-tag" style="background:#1a2a1a;color:var(--g)">技術スタック</span>
+  </div>
+  <table class="tech-table">
+    <tr><td>フロントエンド</td><td>index.html（全機能1ファイル・バニラJS）</td></tr>
+    <tr><td>バックエンド</td><td>Google Apps Script（factory_progress_gas_full.gs）</td></tr>
+    <tr><td>データストア</td><td>Googleスプレッドシート</td></tr>
+    <tr><td>ホスティング</td><td>GitHub Pages</td></tr>
+    <tr><td>対応ブラウザ</td><td>Chrome（推奨）</td></tr>
+  </table>
+</div>
+
+</div>
+<button class="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+</body>
+</html>
