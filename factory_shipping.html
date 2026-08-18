@@ -608,7 +608,7 @@ let st = {
   pallets: [],
   bara: [],
   deliveryHistory: [],
-  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [] },
+  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [], pendingDeletes: [] },
   baraPrintTarget: true,
   baraChecklistPrinted: false,
   lastSyncedWorkAt: ''
@@ -648,7 +648,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   renderMaterialStockTable();
   renderMaterialMovementList();
   populateMaterialGroupSelect();
-  if(settings.gasUrl){ loadFromGas(); startPolling(); }
+  if(settings.gasUrl){ loadFromGas(); startPolling(); startPendingDeleteRetry(); }
 });
 
 function setDefaultDate(){
@@ -720,7 +720,8 @@ function loadLocalState(){
     st.pallets         = d.pallets         || [];
     st.bara            = d.bara            || [];
     st.deliveryHistory = d.deliveryHistory || [];
-    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[]};
+    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[], pendingDeletes:[]};
+    if(!Array.isArray(st.materialStock.pendingDeletes)) st.materialStock.pendingDeletes = []; // 旧バージョンのローカル保存データ互換
     st.lastSyncedWorkAt = d.lastSyncedWorkAt || '';
     st.baraPrintTarget = d.baraPrintTarget !== false;
     st.baraChecklistPrinted = d.baraChecklistPrinted === true;
@@ -850,7 +851,10 @@ async function _loadFromGasCore(){
 
   if(msData && msData.ok){
     st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
-    const serverMovements = msData.movements || [];
+    const pendingDeletes = new Set(st.materialStock.pendingDeletes||[]);
+    // 削除依頼中のidは、サーバーにまだ残っていても画面には復活させない
+    // （削除の応答が配達失敗しただけで、実際は削除待ち。裏の自動リトライで確実に消える）
+    const serverMovements = (msData.movements || []).filter(m=>!pendingDeletes.has(m.id));
     const serverIds = new Set(serverMovements.map(m=>m.id));
     // サーバーにまだ無い（未送信の可能性がある）ローカルの記録は消さずに残す
     const localOnly = st.materialStock.movements.filter(m=>!serverIds.has(m.id));
@@ -3255,12 +3259,43 @@ function renderMaterialMovementList(){
 async function deleteMaterialMovementUI(id){
   if(!confirm('この入荷・返品の記録を削除しますか？')) return;
   st.materialStock.movements = st.materialStock.movements.filter(m=>m.id!==id);
+  // 「削除済みにしたい」idとして記録しておく。応答が配達失敗しても、
+  // このリストに残っている限りリロード時に復活させず、裏で自動的に削除を再試行し続ける
+  if(!st.materialStock.pendingDeletes.includes(id)) st.materialStock.pendingDeletes.push(id);
   saveLocalState();
   renderMaterialStockTable(); renderMaterialMovementList();
   if(settings.gasUrl){
-    try{ await gasPost({action:'deleteMaterialMovement', id}); }
-    catch(e){ toast('GAS削除エラー: '+e.message); }
+    try{
+      const res = await gasPost({action:'deleteMaterialMovement', id});
+      if(res && res.ok){
+        st.materialStock.pendingDeletes = st.materialStock.pendingDeletes.filter(x=>x!==id);
+        saveLocalState();
+      }
+      // 失敗・応答無しの場合はpendingDeletesに残したままにする（背景リトライに任せる）
+    }
+    catch(e){ toast('削除の送信に失敗しました。自動的に再試行します'); }
   }
+}
+
+// 未確定の削除（応答の配達失敗等でサーバー側にまだ反映できていない可能性のある削除）を、
+// 画面を止めずに裏で定期的に再試行する
+let _pendingDeleteRetryTimer = null;
+function startPendingDeleteRetry(){
+  if(_pendingDeleteRetryTimer) clearInterval(_pendingDeleteRetryTimer);
+  _pendingDeleteRetryTimer = setInterval(async()=>{
+    if(!settings.gasUrl) return;
+    const ids = (st.materialStock.pendingDeletes||[]).slice();
+    if(ids.length===0) return;
+    for(const id of ids){
+      try{
+        const res = await gasPost({action:'deleteMaterialMovement', id});
+        if(res && res.ok){
+          st.materialStock.pendingDeletes = st.materialStock.pendingDeletes.filter(x=>x!==id);
+          saveLocalState();
+        }
+      }catch(e){ /* 次回の周期でまた再試行するので、ここでは何もしない */ }
+    }
+  }, 20000); // 20秒おきに未確定の削除を確認・再試行
 }
 
 function openMaterialStockSettings(){
