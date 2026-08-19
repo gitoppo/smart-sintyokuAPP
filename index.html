@@ -1278,6 +1278,7 @@ function closeP2Sheet() {
 // 運用：st.stock[itemId] = { "端末名_YYYY-MM-DD": 数値 }（②個人タブのpostDoneと同形式）
 // ============================================================
 let _stockOpenGroup = null;
+let _stockDeletedIds = new Set(); // 明示的に削除したitemIdを記録（ポーリングで復活させない）
 
 function buildStockGroups() {
   const dn = st.deviceName;
@@ -1366,9 +1367,15 @@ function renderStockSheetBody(g) {
 function deleteStockItem(itemId, colorName) {
   if (!confirm(`「${colorName}」を削除しますか？\n全端末分の入力数量が消えます。`)) return;
   const deletedIds = [itemId];
+  _stockDeletedIds.add(itemId);
   if (st.stock) delete st.stock[itemId];
   saveLocal();
-  Cloud.saveStock(() => updateSyncBar('ok'), () => updateSyncBar('error'), deletedIds);
+  // 削除操作：stockは空で送らず、deletedIdsのみGASに伝える
+  Cloud.post(
+    { action:'saveStock', stock: {}, isDelete: true, deletedIds },
+    () => { _stockDeletedIds.delete(itemId); updateSyncBar('ok'); },
+    () => updateSyncBar('error')
+  );
   // グループ内に残りの品目があればボトムシートを更新、なければ閉じる
   const groups = buildStockGroups();
   const g = groups.find(gg => gg.name === _stockOpenGroup);
@@ -1384,10 +1391,18 @@ function deleteStockItem(itemId, colorName) {
 function askDeleteStockGroup(groupName) {
   if (!confirm(`「${groupName}」のストックを削除しますか？\n全端末分の入力数量も全て消えます。`)) return;
   const deletedIds = st.itemMaster.filter(it => dispN(it) === groupName).map(it => it.id);
-  deletedIds.forEach(id => { if (st.stock) delete st.stock[id]; });
+  deletedIds.forEach(id => {
+    _stockDeletedIds.add(id);
+    if (st.stock) delete st.stock[id];
+  });
   closeStockSheet();
   saveLocal();
-  Cloud.saveStock(() => updateSyncBar('ok'), () => updateSyncBar('error'), deletedIds);
+  // 削除操作：stockは空で送らず、deletedIdsのみGASに伝える
+  Cloud.post(
+    { action:'saveStock', stock: {}, isDelete: true, deletedIds },
+    () => { deletedIds.forEach(id => _stockDeletedIds.delete(id)); updateSyncBar('ok'); },
+    () => updateSyncBar('error')
+  );
   renderStock();
   showToast(`🗑 「${groupName}」のストックを削除しました`);
 }
@@ -1436,7 +1451,22 @@ function stockSetQty(itemId, val) {
 let _stockSaveTimer = null;
 function debouncedStockSave() {
   clearTimeout(_stockSaveTimer);
-  _stockSaveTimer = setTimeout(() => { Cloud.saveStock(null, null); }, 600);
+  _stockSaveTimer = setTimeout(() => {
+    const dn = st.deviceName;
+    const today = todayStr();
+    if (!dn) return;
+    // 自端末の今日分のキーがある品目のみ送信（他端末のデータを上書きしないため）
+    const dayKey = dn + '_' + today;
+    const myStock = {};
+    Object.entries(st.stock || {}).forEach(([itemId, entry]) => {
+      if (entry && typeof entry === 'object' && dayKey in entry) {
+        myStock[itemId] = { [dayKey]: entry[dayKey] };
+      }
+    });
+    if (Object.keys(myStock).length === 0) return;
+    const payload = { action:'saveStock', stock: myStock };
+    Cloud.post(payload, () => markSaved(), () => updateSyncBar('error'));
+  }, 600);
 }
 
 // ============================================================
@@ -1545,7 +1575,15 @@ function transferStockToProgress() {
 
   saveLocal();
   Cloud.savePlansProgress(() => updateSyncBar('ok'), () => updateSyncBar('error'));
-  Cloud.saveStock(() => {}, () => {}, deletedItemIds.length > 0 ? deletedItemIds : null);
+  // 転記済み品目の削除：stockは空で送らず、deletedIdsのみGASに伝える
+  if (deletedItemIds.length > 0) {
+    deletedItemIds.forEach(id => _stockDeletedIds.add(id));
+    Cloud.post(
+      { action:'saveStock', stock: {}, isDelete: true, deletedIds: deletedItemIds },
+      () => { deletedItemIds.forEach(id => _stockDeletedIds.delete(id)); },
+      () => {}
+    );
+  }
   renderAll();
   showToast(`📋 ${transferList.length}件を②個人タブへ転記しました`);
 }
@@ -1642,13 +1680,13 @@ function closeStockPicker() {
 
 function addStockGroup(groupName) {
   if (!st.stock) st.stock = {};
-  // グループ内の品目に stock キーを作成（0で初期化、未設定のみ）
+  // グループ内の品目に stock キーを作成（空オブジェクトで初期化、未設定のみ）
   st.itemMaster.filter(it => dispN(it) === groupName).forEach(it => {
-    if (!(it.id in st.stock)) st.stock[it.id] = 0;
+    if (!(it.id in st.stock)) st.stock[it.id] = {};
   });
   closeStockPicker();
   saveLocal();
-  debouncedStockSave();
+  // 追加時は数値未入力なのでクラウド送信不要（数値入力時にdebouncedStockSaveで送信される）
   renderStock();
   openStockSheet(groupName);
 }
@@ -2902,22 +2940,11 @@ function applyCloudData(json, forceShiftAttend) {
     }
   }
   if (json.stock && typeof json.stock === 'object') {
-    // ストック入力欄にフォーカス中、または未送信データがある場合は自端末の今日分を必ず保護
     const dn = st.deviceName;
     const today = todayStr();
     const localStock = st.stock || {};
-    const hasLocalStock = Object.keys(localStock).length > 0;
     const stockInputFocused = !!(document.activeElement && document.activeElement.classList.contains('stock-num-input'));
 
-    // 削除済みitemId：ローカルにデータがある状態でクラウドにあってローカルにないもの
-    const localDeletedIds = new Set();
-    if (hasLocalStock) {
-      Object.keys(json.stock).forEach(itemId => {
-        if (!Object.prototype.hasOwnProperty.call(localStock, itemId)) {
-          localDeletedIds.add(itemId);
-        }
-      });
-    }
     // 自端末の今日分を退避（入力中・未送信に関わらず常に保護）
     const myLocal = {};
     Object.entries(localStock).forEach(([itemId, entry]) => {
@@ -2927,11 +2954,12 @@ function applyCloudData(json, forceShiftAttend) {
       }
     });
 
-    // 入力欄にフォーカス中はst.stock自体を更新しない（描画も止まる）
+    // 入力欄にフォーカス中はst.stock自体を更新しない
     if (!stockInputFocused) {
       st.stock = {};
       Object.entries(json.stock).forEach(([itemId, entry]) => {
-        if (localDeletedIds.has(itemId)) return;
+        // 明示的に削除されたitemIdはスキップ（_stockDeletedIdsで管理）
+        if (_stockDeletedIds.has(itemId)) return;
         st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
       });
       // 自端末の今日分を復元（ローカル優先）
