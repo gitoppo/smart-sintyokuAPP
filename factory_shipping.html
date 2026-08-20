@@ -442,6 +442,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 
   <div class="card">
     <div class="cardTitle">入荷・返品 履歴</div>
+    <div id="pendingDeleteBanner" style="display:none;background:#fff3cd;border:1px solid #ffe08a;color:#8a6a1a;padding:8px 12px;border-radius:4px;font-size:12.5px;margin-bottom:10px;"></div>
     <div id="materialMovementList"></div>
   </div>
 </div>
@@ -629,6 +630,19 @@ let settings = {
 let _editingRecordId = null; // 編集中の履歴ID
 
 // ===== 初期化 =====
+// 未確定の削除（サーバーへの反映がまだ確認できていない削除）が残っている間に
+// タブを閉じよう・移動しようとした場合、警告を出す。
+// 背景リトライはタブが開いている間しか動かないため、これが無いと
+// 「削除ボタンは押したが、閉じるのが早すぎて実際にはサーバーに反映されないまま」
+// という状態を防げない（実際に起きたことが確認された不具合への対策）。
+window.addEventListener('beforeunload', (e)=>{
+  const hasPendingDeletes = st.materialStock && st.materialStock.pendingDeletes && st.materialStock.pendingDeletes.length > 0;
+  if(hasPendingDeletes){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
 window.addEventListener('DOMContentLoaded', ()=>{
   loadSettings();
   loadLocalState();
@@ -3239,6 +3253,7 @@ async function addMaterialMovement(){
 }
 
 function renderMaterialMovementList(){
+  renderPendingDeleteBanner();
   const el = document.getElementById('materialMovementList');
   if(!el) return;
   const list = [...st.materialStock.movements].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.timestamp||'').localeCompare(a.timestamp||''));
@@ -3256,6 +3271,20 @@ function renderMaterialMovementList(){
   `).join('');
 }
 
+// ⑤タブに、未確定の削除件数を表示する（0件なら非表示）
+function renderPendingDeleteBanner(){
+  const el = document.getElementById('pendingDeleteBanner');
+  if(!el) return;
+  const n = (st.materialStock.pendingDeletes||[]).length;
+  if(n > 0){
+    el.style.display = 'block';
+    el.textContent = `⚠️ 未確定の削除が${n}件あります（自動的に再試行中です。このタブを閉じずにお待ちください）`;
+  }else{
+    el.style.display = 'none';
+    el.textContent = '';
+  }
+}
+
 async function deleteMaterialMovementUI(id){
   if(!confirm('この入荷・返品の記録を削除しますか？')) return;
   st.materialStock.movements = st.materialStock.movements.filter(m=>m.id!==id);
@@ -3270,6 +3299,7 @@ async function deleteMaterialMovementUI(id){
       if(res && res.ok){
         st.materialStock.pendingDeletes = st.materialStock.pendingDeletes.filter(x=>x!==id);
         saveLocalState();
+        renderPendingDeleteBanner();
       }
       // 失敗・応答無しの場合はpendingDeletesに残したままにする（背景リトライに任せる）
     }
@@ -3292,6 +3322,7 @@ function startPendingDeleteRetry(){
         if(res && res.ok){
           st.materialStock.pendingDeletes = st.materialStock.pendingDeletes.filter(x=>x!==id);
           saveLocalState();
+          renderPendingDeleteBanner();
         }
       }catch(e){ /* 次回の周期でまた再試行するので、ここでは何もしない */ }
     }
