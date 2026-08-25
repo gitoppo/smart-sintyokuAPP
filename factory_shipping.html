@@ -508,6 +508,11 @@ tr:nth-child(even) td{background:#f9f9f9;}
 
 <!-- ⚙️設定タブ -->
 <div id="tabSettings" class="tabContent">
+  <div class="card" style="background:#f7f8fb;">
+    <div class="cardTitle">📦 このアプリのバージョン</div>
+    <div id="appVersionDisplay" style="font-size:13px;color:#333;font-family:monospace;"></div>
+    <div style="font-size:11px;color:#999;margin-top:4px;">この画面で読み込まれているコードの更新日時です。更新が反映されているか確認したい時にご覧ください。</div>
+  </div>
   <div class="card">
     <div class="cardTitle">📖 取扱説明書</div>
     <div style="font-size:12px;color:#666;margin-bottom:8px;">各タブの使い方・注意点をまとめています。</div>
@@ -601,6 +606,11 @@ tr:nth-child(even) td{background:#f9f9f9;}
 const MATERIAL_WIDTH = 1220;
 const TAX_RATE = 0.10;
 
+// このアプリ（factory_shipping.html）のバージョン。
+// コードを更新するたびに、日時と内容を1行で更新してください。
+// ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
+const APP_VERSION = '2026-08-25 17:00 - 材料在庫：pendingAdds対応（確定ボタン後の他端末での誤復活を修正）';
+
 // ===== 状態 =====
 let st = {
   itemMaster: [],
@@ -644,6 +654,8 @@ window.addEventListener('beforeunload', (e)=>{
 });
 
 window.addEventListener('DOMContentLoaded', ()=>{
+  const verEl = document.getElementById('appVersionDisplay');
+  if(verEl) verEl.textContent = APP_VERSION;
   loadSettings();
   loadLocalState();
   loadCheckValsFromLocal();
