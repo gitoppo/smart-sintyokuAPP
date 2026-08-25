@@ -609,7 +609,7 @@ let st = {
   pallets: [],
   bara: [],
   deliveryHistory: [],
-  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [], pendingDeletes: [] },
+  materialStock: { settings: { enabledGroups: [], baseline: {}, baselineDate: '', repairKeywords: [] }, movements: [], pendingDeletes: [], pendingAdds: [] },
   baraPrintTarget: true,
   baraChecklistPrinted: false,
   lastSyncedWorkAt: ''
@@ -636,7 +636,7 @@ let _editingRecordId = null; // 編集中の履歴ID
 // 「削除ボタンは押したが、閉じるのが早すぎて実際にはサーバーに反映されないまま」
 // という状態を防げない（実際に起きたことが確認された不具合への対策）。
 window.addEventListener('beforeunload', (e)=>{
-  const hasPendingDeletes = st.materialStock && st.materialStock.pendingDeletes && st.materialStock.pendingDeletes.length > 0;
+  const hasPendingDeletes = st.materialStock && ((st.materialStock.pendingDeletes && st.materialStock.pendingDeletes.length > 0) || (st.materialStock.pendingAdds && st.materialStock.pendingAdds.length > 0));
   if(hasPendingDeletes){
     e.preventDefault();
     e.returnValue = '';
@@ -662,7 +662,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   renderMaterialStockTable();
   renderMaterialMovementList();
   populateMaterialGroupSelect();
-  if(settings.gasUrl){ loadFromGas(); startPolling(); startPendingDeleteRetry(); }
+  if(settings.gasUrl){ loadFromGas(); startPolling(); startPendingSyncRetry(); }
 });
 
 function setDefaultDate(){
@@ -734,8 +734,9 @@ function loadLocalState(){
     st.pallets         = d.pallets         || [];
     st.bara            = d.bara            || [];
     st.deliveryHistory = d.deliveryHistory || [];
-    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[], pendingDeletes:[]};
+    st.materialStock   = d.materialStock   || {settings:{enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]}, movements:[], pendingDeletes:[], pendingAdds:[]};
     if(!Array.isArray(st.materialStock.pendingDeletes)) st.materialStock.pendingDeletes = []; // 旧バージョンのローカル保存データ互換
+    if(!Array.isArray(st.materialStock.pendingAdds)) st.materialStock.pendingAdds = []; // 旧バージョンのローカル保存データ互換
     st.lastSyncedWorkAt = d.lastSyncedWorkAt || '';
     st.baraPrintTarget = d.baraPrintTarget !== false;
     st.baraChecklistPrinted = d.baraChecklistPrinted === true;
@@ -866,18 +867,28 @@ async function _loadFromGasCore(){
   if(msData && msData.ok){
     st.materialStock.settings = msData.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
     const pendingDeletes = new Set(st.materialStock.pendingDeletes||[]);
+    const pendingAdds = new Set(st.materialStock.pendingAdds||[]);
     // 削除依頼中のidは、サーバーにまだ残っていても画面には復活させない
     // （削除の応答が配達失敗しただけで、実際は削除待ち。裏の自動リトライで確実に消える）
     const serverMovements = (msData.movements || []).filter(m=>!pendingDeletes.has(m.id));
     const serverIds = new Set(serverMovements.map(m=>m.id));
-    // サーバーにまだ無い（未送信の可能性がある）ローカルの記録は消さずに残す
-    const localOnly = st.materialStock.movements.filter(m=>!serverIds.has(m.id));
+    // 「サーバーに無い」だけでは再送信対象にしない。
+    // サーバーから消えているのは、未送信のケースだけでなく、他端末での確定（アーカイブ）・削除の
+    // 結果であることも多いため、"この端末が最近追加し、まだ成功確認が取れていないもの"（pendingAdds）
+    // に該当するものだけを再送信対象とする。
+    const localOnly = st.materialStock.movements.filter(m=>!serverIds.has(m.id) && pendingAdds.has(m.id));
     st.materialStock.movements = [...serverMovements, ...localOnly];
     saveLocalState();
     if(localOnly.length > 0){
-      // 念のため再送信を試みる（前回の保存が失敗していた場合の保険）
+      // 未送信の可能性があるものだけ、念のため再送信を試みる
       for(const m of localOnly){
-        try{ await gasPost({action:'saveMaterialMovement', movement:m}); }catch(e){}
+        try{
+          const r = await gasPost({action:'saveMaterialMovement', movement:m});
+          if(r && r.ok){
+            st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==m.id);
+            saveLocalState();
+          }
+        }catch(e){}
       }
       toast(`未送信だった入荷・返品データ${localOnly.length}件を再送信しました`);
     }
@@ -3234,6 +3245,10 @@ async function addMaterialMovement(){
     deviceName:settings.deviceName||'', timestamp:new Date().toISOString()
   };
   st.materialStock.movements.push(movement);
+  // 「この端末が追加したが、まだサーバーでの保存成功が確認できていない」idとして記録。
+  // これがあることで、後からリロードした際の再送信は「本当に未送信の可能性があるもの」だけに限定され、
+  // 他の端末で正しく削除・アーカイブされたデータまで誤って復活させてしまうことを防げる。
+  if(!st.materialStock.pendingAdds.includes(movement.id)) st.materialStock.pendingAdds.push(movement.id);
   saveLocalState();
   renderMaterialStockTable(); renderMaterialMovementList();
   document.getElementById('msMoveQty').value='';
@@ -3244,7 +3259,11 @@ async function addMaterialMovement(){
     try{
       const res = await gasPost({action:'saveMaterialMovement', movement});
       if(!res || !res.ok) toast('GAS保存エラー: '+(res?res.error:'不明'));
-      else toast('登録しました');
+      else{
+        toast('登録しました');
+        st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==movement.id);
+        saveLocalState();
+      }
     }catch(e){ toast('通信エラー: '+e.message); }
     finally{ showLoading(false); }
   } else {
@@ -3275,10 +3294,14 @@ function renderMaterialMovementList(){
 function renderPendingDeleteBanner(){
   const el = document.getElementById('pendingDeleteBanner');
   if(!el) return;
-  const n = (st.materialStock.pendingDeletes||[]).length;
-  if(n > 0){
+  const nDel = (st.materialStock.pendingDeletes||[]).length;
+  const nAdd = (st.materialStock.pendingAdds||[]).length;
+  if(nDel > 0 || nAdd > 0){
     el.style.display = 'block';
-    el.textContent = `⚠️ 未確定の削除が${n}件あります（自動的に再試行中です。このタブを閉じずにお待ちください）`;
+    const parts = [];
+    if(nDel>0) parts.push(`削除${nDel}件`);
+    if(nAdd>0) parts.push(`登録${nAdd}件`);
+    el.textContent = `⚠️ 未確定の${parts.join('・')}があります（自動的に再試行中です。このタブを閉じずにお待ちください）`;
   }else{
     el.style.display = 'none';
     el.textContent = '';
@@ -3307,16 +3330,15 @@ async function deleteMaterialMovementUI(id){
   }
 }
 
-// 未確定の削除（応答の配達失敗等でサーバー側にまだ反映できていない可能性のある削除）を、
+// 未確定の削除・追加（応答の配達失敗等でサーバー側にまだ反映できていない可能性のあるもの）を、
 // 画面を止めずに裏で定期的に再試行する
-let _pendingDeleteRetryTimer = null;
-function startPendingDeleteRetry(){
-  if(_pendingDeleteRetryTimer) clearInterval(_pendingDeleteRetryTimer);
-  _pendingDeleteRetryTimer = setInterval(async()=>{
+let _pendingSyncRetryTimer = null;
+function startPendingSyncRetry(){
+  if(_pendingSyncRetryTimer) clearInterval(_pendingSyncRetryTimer);
+  _pendingSyncRetryTimer = setInterval(async()=>{
     if(!settings.gasUrl) return;
-    const ids = (st.materialStock.pendingDeletes||[]).slice();
-    if(ids.length===0) return;
-    for(const id of ids){
+    const deleteIds = (st.materialStock.pendingDeletes||[]).slice();
+    for(const id of deleteIds){
       try{
         const res = await gasPost({action:'deleteMaterialMovement', id});
         if(res && res.ok){
@@ -3326,7 +3348,19 @@ function startPendingDeleteRetry(){
         }
       }catch(e){ /* 次回の周期でまた再試行するので、ここでは何もしない */ }
     }
-  }, 20000); // 20秒おきに未確定の削除を確認・再試行
+    const addIds = (st.materialStock.pendingAdds||[]).slice();
+    for(const id of addIds){
+      const m = st.materialStock.movements.find(x=>x.id===id);
+      if(!m){ st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==id); continue; } // ローカルからも既に消えていれば対象外
+      try{
+        const res = await gasPost({action:'saveMaterialMovement', movement:m});
+        if(res && res.ok){
+          st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==id);
+          saveLocalState();
+        }
+      }catch(e){ /* 次回の周期でまた再試行するので、ここでは何もしない */ }
+    }
+  }, 20000); // 20秒おきに未確定の削除・追加を確認・再試行
 }
 
 function openMaterialStockSettings(){
