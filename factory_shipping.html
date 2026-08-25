@@ -441,7 +441,10 @@ tr:nth-child(even) td{background:#f9f9f9;}
   </div>
 
   <div class="card">
-    <div class="cardTitle">入荷・返品 履歴</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+      <div class="cardTitle" style="margin-bottom:0;">入荷・返品 履歴</div>
+      <button class="btn-gray btn-sm no-print" onclick="cleanupOldMaterialMovements()">🗑️ 履歴を整理（直近14日は残す）</button>
+    </div>
     <div id="pendingDeleteBanner" style="display:none;background:#fff3cd;border:1px solid #ffe08a;color:#8a6a1a;padding:8px 12px;border-radius:4px;font-size:12.5px;margin-bottom:10px;"></div>
     <div id="materialMovementList"></div>
   </div>
@@ -609,7 +612,7 @@ const TAX_RATE = 0.10;
 // このアプリ（factory_shipping.html）のバージョン。
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
-const APP_VERSION = '2026-08-25 17:00 - 材料在庫：pendingAdds対応（確定ボタン後の他端末での誤復活を修正）';
+const APP_VERSION = '2026-08-25 18:30 - 材料在庫：確定ボタンとアーカイブを分離、履歴整理ボタン新設（直近14日は保持）';
 
 // ===== 状態 =====
 let st = {
@@ -3430,7 +3433,7 @@ async function saveMaterialStockSettingsFromModal(){
   }
 }
 
-// 現在の計算上の在庫を新しい起点として確定し、それ以前の入荷・返品はアーカイブへ退避する
+// 現在の計算上の在庫を新しい起点として確定する（入荷・返品履歴には一切触れない）
 async function confirmMaterialStockBaseline(){
   const curSettings = st.materialStock.settings || {};
   const enabled = curSettings.enabledGroups || [];
@@ -3438,7 +3441,7 @@ async function confirmMaterialStockBaseline(){
   if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
 
   const todayStr = today();
-  if(!confirm(`現在の計算結果（${todayStr}時点）を新しい起点在庫として確定します。\n起点日より前の入荷・返品記録は削除ではなく、アーカイブシートへ退避されます（あとから見返せます）。\n\n実行しますか？`)) return;
+  if(!confirm(`現在の計算結果（${todayStr}時点）を新しい起点在庫として確定します。\n入荷・返品の履歴はそのまま残ります（削除・アーカイブはされません）。\n\n実行しますか？`)) return;
 
   const rows = computeMaterialStock();
   const newBaseline = {};
@@ -3455,16 +3458,38 @@ async function confirmMaterialStockBaseline(){
     const res1 = await gasPost({action:'saveMaterialStockSettings', settings:newSettings});
     if(!res1 || !res1.ok){ toast('起点の保存に失敗しました: '+(res1?res1.error:'不明なエラー')); return; }
     st.materialStock.settings = newSettings;
-
-    const res2 = await gasPost({action:'archiveMaterialMovements', cutoffDate: todayStr});
-    if(res2 && res2.ok){
-      st.materialStock.movements = st.materialStock.movements.filter(m=>!(m.date && m.date<=todayStr));
-      toast(`起点を更新しました（入荷・返品${res2.archivedCount||0}件をアーカイブ）`);
-    } else {
-      toast('起点は更新されましたが、アーカイブ処理でエラーが出ました: '+(res2?res2.error:'不明なエラー'));
-    }
+    toast('起点を更新しました');
     saveLocalState();
     renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
+  }catch(e){ toast('通信エラー: '+e.message); }
+  finally{ showLoading(false); }
+}
+
+// 入荷・返品履歴の整理：直近14日分は必ず残し、それより古い記録だけをアーカイブへ退避する。
+// 確定ボタンとは完全に独立した機能（起点日・在庫計算には一切影響しない）。
+const MATERIAL_MOVEMENT_RETENTION_DAYS = 14;
+async function cleanupOldMaterialMovements(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - MATERIAL_MOVEMENT_RETENTION_DAYS);
+  const cutoffStr = cutoff.toISOString().slice(0,10);
+
+  const targetCount = st.materialStock.movements.filter(m=>m.date && m.date<=cutoffStr).length;
+  if(targetCount===0){ toast(`${cutoffStr}以前の履歴はありません`); return; }
+  if(!confirm(`${cutoffStr}（直近${MATERIAL_MOVEMENT_RETENTION_DAYS}日より前）の入荷・返品履歴 ${targetCount}件をアーカイブへ退避します。\n直近${MATERIAL_MOVEMENT_RETENTION_DAYS}日分の履歴は残ります。在庫の計算結果には影響しません。\n\n実行しますか？`)) return;
+
+  showLoading(true);
+  try{
+    const res = await gasPost({action:'archiveMaterialMovements', cutoffDate: cutoffStr});
+    if(res && res.ok){
+      st.materialStock.movements = st.materialStock.movements.filter(m=>!(m.date && m.date<=cutoffStr));
+      saveLocalState();
+      renderMaterialStockTable(); renderMaterialMovementList();
+      toast(`${res.archivedCount||0}件をアーカイブしました`);
+    } else {
+      toast('アーカイブ処理でエラーが出ました: '+(res?res.error:'不明なエラー'));
+    }
   }catch(e){ toast('通信エラー: '+e.message); }
   finally{ showLoading(false); }
 }
