@@ -612,7 +612,8 @@ const TAX_RATE = 0.10;
 // このアプリ（factory_shipping.html）のバージョン。
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
-const APP_VERSION = '2026-08-25 19:15 - バラ：同一品目の行を複製する「複製」ボタンを新設（注文番号違いの別行作成を簡単に）';
+// 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
+const APP_VERSION_NOTE = 'バラ：同一品目の行を複製する「複製」ボタンを新設（注文番号違いの別行作成を簡単に）';
 
 // ===== 状態 =====
 let st = {
@@ -658,7 +659,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 window.addEventListener('DOMContentLoaded', ()=>{
   const verEl = document.getElementById('appVersionDisplay');
-  if(verEl) verEl.textContent = APP_VERSION;
+  if(verEl) verEl.textContent = document.lastModified + ' - ' + APP_VERSION_NOTE;
   loadSettings();
   loadLocalState();
   loadCheckValsFromLocal();
