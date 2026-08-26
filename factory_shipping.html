@@ -374,6 +374,10 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <span style="font-size:11px;color:#999;margin-left:6px;">各項目左のチェックボックスで選択（納品書のみ対象）</span>
     </div>
     <div id="historyList"></div>
+    <div style="margin-top:14px;padding-top:10px;border-top:1px solid #eee;">
+      <button class="btn-gray btn-sm no-print" onclick="cleanupOldDeliveryHistory()">🗑️ 履歴を整理（直近3ヶ月は残す）</button>
+      <div style="font-size:11px;color:#999;margin-top:4px;">古い履歴は削除ではなくアーカイブ（外部保管庫）へ退避されます。<b>まだ請求書を発行していない月のデータは整理しないでください</b>（その月の請求書が作れなくなります）。</div>
+    </div>
   </div>
 </div>
 
@@ -613,7 +617,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = 'バラ：同一品目の行を複製する「複製」ボタンを新設（注文番号違いの別行作成を簡単に）';
+const APP_VERSION_NOTE = '出荷履歴のアーカイブ機能を新設（外部保管庫へ退避）、材料在庫アーカイブも本体シートから外部保管庫へ変更';
 
 // ===== 状態 =====
 let st = {
@@ -2233,6 +2237,37 @@ function printSelectedHistoryAsPdf(){
   document.getElementById('printArea').innerHTML = printContent;
   fitSlipCellText();
   requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));
+}
+
+// 出荷履歴の整理：直近3ヶ月分は必ず残し、それより古い履歴だけをアーカイブ（外部保管庫）へ退避する。
+// deliveryHistoryにはこれまでアーカイブの仕組みが無く、放置すると本体スプレッドシートが肥大化するため新設。
+// 注意：④請求書タブの集計はこのシート（アーカイブ前のデータ）を見るため、
+// まだ請求書を発行していない月のデータをアーカイブすると、その月の請求書が作れなくなる。
+const DELIVERY_HISTORY_RETENTION_MONTHS = 3;
+async function cleanupOldDeliveryHistory(){
+  if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
+
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - DELIVERY_HISTORY_RETENTION_MONTHS);
+  const cutoffStr = cutoff.toISOString().slice(0,10);
+
+  const targetCount = st.deliveryHistory.filter(r=>r.shippingDate && r.shippingDate<=cutoffStr).length;
+  if(targetCount===0){ toast(`${cutoffStr}以前の履歴はありません`); return; }
+  if(!confirm(`${cutoffStr}（直近${DELIVERY_HISTORY_RETENTION_MONTHS}ヶ月より前）の出荷履歴 ${targetCount}件をアーカイブへ退避します。\n直近${DELIVERY_HISTORY_RETENTION_MONTHS}ヶ月分は残ります。\n\n⚠️ まだ請求書を発行していない月のデータが含まれていないか、必ず確認してから実行してください（アーカイブすると、その月の請求書集計ができなくなります）。\n\n実行しますか？`)) return;
+
+  showLoading(true);
+  try{
+    const res = await gasPost({action:'archiveDeliveryHistory', cutoffDate: cutoffStr});
+    if(res && res.ok){
+      st.deliveryHistory = st.deliveryHistory.filter(r=>!(r.shippingDate && r.shippingDate<=cutoffStr));
+      saveLocalState();
+      renderHistory();
+      toast(`${res.archivedCount||0}件をアーカイブしました`);
+    } else {
+      toast('アーカイブ処理でエラーが出ました: '+(res?res.error:'不明なエラー'));
+    }
+  }catch(e){ toast('通信エラー: '+e.message); }
+  finally{ showLoading(false); }
 }
 
 function printDelivery(grouped, existingRecord, startNo=1){
