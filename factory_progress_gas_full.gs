@@ -1,7 +1,7 @@
 // ============================================================
 // 工場進捗管理 GAS サーバー
-// 内部バージョン: v1（GAS_CHANGELOG.md 参照）
-// 最終更新: 2026年8月18日
+// 内部バージョン: v2（GAS_CHANGELOG.md 参照）
+// 最終更新: 2026年8月19日
 // ============================================================
 
 function doGet(e) {
@@ -346,10 +346,18 @@ function saveStock_(p) {
     const isDelete = p.isDelete || false;
 
     if (isDelete) {
-      // 削除操作：送信されてきたitemIdのキーをクラウドから削除
+      // 削除操作①：itemId単位の削除（品目・カラーごと丸ごと削除）
       const deletedIds = p.deletedIds || [];
       deletedIds.forEach(function(itemId) {
         delete current[itemId];
+      });
+      // 削除操作②：itemId内の特定キーのみ削除（履歴の1件だけ削除）
+      const deletedKeys = p.deletedKeys || {};
+      Object.keys(deletedKeys).forEach(function(itemId) {
+        if (!current[itemId] || typeof current[itemId] !== 'object') return;
+        (deletedKeys[itemId] || []).forEach(function(key) {
+          delete current[itemId][key];
+        });
       });
       // 残りのitemIdはマージ
       Object.keys(incoming).forEach(function(itemId) {
