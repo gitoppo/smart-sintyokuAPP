@@ -1,7 +1,14 @@
 // ============================================================
-// 工場進捗管理 GAS サーバー
-// 内部バージョン: v2（GAS_CHANGELOG.md 参照）
-// 最終更新: 2026年8月19日
+// 工場進捗管理 GAS サーバー v5.1
+// ============================================================
+//
+// ▼変更履歴管理（GAS_CHANGELOG.md）
+// 内部バージョン: v2  (2026-08-26)
+//
+// 【重要】このファイルは出荷管理アプリ・進捗管理アプリの両方から共有されています。
+// 編集する前に、必ず GitHub から最新版を取得してください（古いローカルコピーを土台にしない）。
+// 編集後は、GAS_CHANGELOG.md に変更内容を追記したうえで、上の内部バージョン番号も更新してください。
+// デプロイは「GitHubへのpush」と「Apps Scriptエディタでの新しいバージョンデプロイ」の両方が必要です。
 // ============================================================
 
 function doGet(e) {
@@ -42,6 +49,7 @@ function doPost(e) {
     if (action === 'saveMaterialMovement')      return saveMaterialMovement_(p);
     if (action === 'deleteMaterialMovement')    return deleteMaterialMovement_(p);
     if (action === 'archiveMaterialMovements')   return archiveMaterialMovements_(p);
+    if (action === 'archiveDeliveryHistory')     return archiveDeliveryHistory_(p);
     return errRes('unknown action: ' + action);
   } catch (ex) {
     return errRes(ex.message);
@@ -346,18 +354,10 @@ function saveStock_(p) {
     const isDelete = p.isDelete || false;
 
     if (isDelete) {
-      // 削除操作①：itemId単位の削除（品目・カラーごと丸ごと削除）
+      // 削除操作：送信されてきたitemIdのキーをクラウドから削除
       const deletedIds = p.deletedIds || [];
       deletedIds.forEach(function(itemId) {
         delete current[itemId];
-      });
-      // 削除操作②：itemId内の特定キーのみ削除（履歴の1件だけ削除）
-      const deletedKeys = p.deletedKeys || {};
-      Object.keys(deletedKeys).forEach(function(itemId) {
-        if (!current[itemId] || typeof current[itemId] !== 'object') return;
-        (deletedKeys[itemId] || []).forEach(function(key) {
-          delete current[itemId][key];
-        });
       });
       // 残りのitemIdはマージ
       Object.keys(incoming).forEach(function(itemId) {
@@ -697,7 +697,7 @@ function migrateOperationLogArchive_() {
   const allSheets = ss.getSheets();
   const targets = allSheets.filter(function (s) {
     const n = s.getName();
-    return n === 'operationLog_archive' || n.indexOf('plans_archive_') === 0 || n.indexOf('progress_archive_') === 0;
+    return n === 'operationLog_archive' || n === 'materialMovements_archive' || n === 'deliveryHistory_archive' || n.indexOf('plans_archive_') === 0 || n.indexOf('progress_archive_') === 0;
   });
 
   if (targets.length === 0) {
@@ -862,6 +862,7 @@ function deleteMaterialMovement_(p) {
 // 起点更新に伴い、起点日以前の入荷・返品を単一のアーカイブシートへ退避する（削除ではなく移動。あとから見返せる）
 function archiveMaterialMovements_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const archiveSs = getOrCreateArchiveSpreadsheet_();
   const lock = LockService.getScriptLock();
   try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
   try {
@@ -873,9 +874,10 @@ function archiveMaterialMovements_(p) {
     const remaining = movements.filter(function (m) { return !(m.date && m.date <= cutoffDate); });
 
     if (toArchive.length > 0) {
-      let archiveSheet = ss.getSheetByName('materialMovements_archive');
+      // 本体スプレッドシートを肥大化させないよう、外部の保管庫スプレッドシートへ書き込む
+      let archiveSheet = archiveSs.getSheetByName('materialMovements_archive');
       if (!archiveSheet) {
-        archiveSheet = ss.insertSheet('materialMovements_archive');
+        archiveSheet = archiveSs.insertSheet('materialMovements_archive');
         archiveSheet.getRange(1, 1, 1, 1).setValues([['json']]);
       }
       const startRow = archiveSheet.getLastRow() + 1;
@@ -885,6 +887,68 @@ function archiveMaterialMovements_(p) {
 
     writeJsonSheet_(ss, 'materialMovements', remaining);
     return ok({ message: toArchive.length + '件をアーカイブしました', archivedCount: toArchive.length });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 出荷履歴（deliveryHistory）のうち、指定日以前のものを外部の保管庫スプレッドシートへアーカイブする。
+// deliveryHistoryは他のアーカイブ対象（materialMovements等）と違い、1行1JSONではなく複数列の
+// シート形式（id, timestamp, ..., shippingDate, type）のため、行ごと・列構成を保ったまま移動する。
+function archiveDeliveryHistory_(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const archiveSs = getOrCreateArchiveSpreadsheet_();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (e) { return errRes('サーバー混雑中です。少し待って再試行してください'); }
+  try {
+    const cutoffDate = p.cutoffDate; // 'YYYY-MM-DD'。この出荷日以前の履歴をアーカイブ
+    if (!cutoffDate) return errRes('cutoffDate is required');
+
+    const sheet = ss.getSheetByName('deliveryHistory');
+    if (!sheet || sheet.getLastRow() < 2) {
+      return ok({ message: 'アーカイブ対象はありませんでした', archivedCount: 0 });
+    }
+    const allRows = sheet.getDataRange().getValues();
+    const headers = allRows[0];
+    const dateColIdx = headers.indexOf('shippingDate');
+    if (dateColIdx === -1) return errRes('shippingDate列が見つかりません');
+
+    const toArchiveRows = [];
+    const remainingRows = [headers];
+    for (let i = 1; i < allRows.length; i++) {
+      const row = allRows[i];
+      let dateVal = row[dateColIdx];
+      if (dateVal instanceof Date) {
+        dateVal = Utilities.formatDate(dateVal, 'Asia/Tokyo', 'yyyy-MM-dd');
+      }
+      if (dateVal && String(dateVal) <= cutoffDate) {
+        toArchiveRows.push(row);
+      } else {
+        remainingRows.push(row);
+      }
+    }
+
+    if (toArchiveRows.length > 0) {
+      let archiveSheet = archiveSs.getSheetByName('deliveryHistory_archive');
+      if (!archiveSheet) {
+        archiveSheet = archiveSs.insertSheet('deliveryHistory_archive');
+        archiveSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      } else {
+        // 本体シートの列（見出し）が後から増えている場合に備えて、アーカイブ側の見出し行を合わせる
+        const archHeaders = archiveSheet.getRange(1, 1, 1, archiveSheet.getLastColumn()).getValues()[0];
+        if (archHeaders.length < headers.length) {
+          archiveSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        }
+      }
+      const startRow = archiveSheet.getLastRow() + 1;
+      archiveSheet.getRange(startRow, 1, toArchiveRows.length, headers.length).setValues(toArchiveRows);
+    }
+
+    // 本体シートを、残す行だけで書き直す
+    sheet.clearContents();
+    sheet.getRange(1, 1, remainingRows.length, headers.length).setValues(remainingRows);
+
+    return ok({ message: toArchiveRows.length + '件をアーカイブしました', archivedCount: toArchiveRows.length });
   } finally {
     lock.releaseLock();
   }
