@@ -1349,19 +1349,94 @@ function renderStockSheetBody(g) {
           <div style="font-size:12px;color:#f87171">全端末</div>
           <div style="font-size:26px;font-weight:700;color:#f87171">${r.totalVal}</div>
         </div>
-        <div style="text-align:center">
-          <div style="font-size:12px;color:#fbbf24">自分累計</div>
+        <div style="text-align:center;cursor:pointer" onclick="toggleStockHistory('${itemId}')">
+          <div style="font-size:12px;color:#fbbf24">自分累計 ▾</div>
           <div style="font-size:26px;font-weight:700;color:#fbbf24">${r.myTotalVal}</div>
         </div>
         <button onclick="deleteStockItem('${itemId}','${esc(r.colorName)}')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--r);background:transparent;color:var(--r);font-size:16px;cursor:pointer;flex-shrink:0">🗑</button>
       </div>
-    </div>`;
+    </div>
+    <div id="stock-history-${itemId}" style="display:none;padding:6px 4px 10px 68px"></div>`;
   }).join('') + `
     <div style="padding:16px 4px 4px">
       <button class="btn-sm btn-danger" onclick="askDeleteStockGroup('${esc(g.name)}')" style="width:100%;padding:10px;font-size:13px;font-weight:600">
         🗑 このストック品目を削除
       </button>
     </div>`;
+}
+
+function toggleStockHistory(itemId) {
+  const el = document.getElementById('stock-history-' + itemId);
+  if (!el) return;
+  if (el.style.display === 'block') {
+    el.style.display = 'none';
+    return;
+  }
+  const dn = st.deviceName;
+  const entry = (st.stock && st.stock[itemId]) || {};
+  // 自分の日付キーのみ抽出（端末名_日付 形式）
+  const myEntries = Object.entries(entry)
+    .filter(([k]) => dn && k.startsWith(dn + '_'))
+    .map(([k, v]) => ({ key: k, date: k.slice(dn.length + 1), val: toNum(v) }))
+    .sort((a, b) => a.date < b.date ? 1 : -1); // 新しい日付が上
+
+  if (myEntries.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--muted)">入力履歴がありません</div>';
+  } else {
+    el.innerHTML = myEntries.map(e => `
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid #16233a">
+        <div style="width:90px;color:var(--muted)">${esc(e.date)}</div>
+        <input type="number" min="0" value="${e.val}" id="stock-hist-${itemId}-${esc(e.date)}"
+          style="width:60px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:#0a1220;color:var(--text);font-size:12px">
+        <span style="color:var(--muted)">個</span>
+        <button onclick="saveStockHistoryEdit('${itemId}','${esc(e.date)}')" style="padding:3px 8px;border-radius:4px;border:1px solid #0891b2;background:transparent;color:#67e8f9;font-size:11px;cursor:pointer">保存</button>
+        <button onclick="deleteStockHistoryEntry('${itemId}','${esc(e.date)}')" style="padding:3px 8px;border-radius:4px;border:1px solid var(--r);background:transparent;color:var(--r);font-size:11px;cursor:pointer">削除</button>
+      </div>
+    `).join('');
+  }
+  el.style.display = 'block';
+}
+
+function saveStockHistoryEdit(itemId, date) {
+  const dn = st.deviceName;
+  if (!dn) return;
+  const inp = document.getElementById(`stock-hist-${itemId}-${date}`);
+  if (!inp) return;
+  const newVal = Math.max(0, toNum(inp.value));
+  const key = dn + '_' + date;
+  if (!st.stock) st.stock = {};
+  if (!st.stock[itemId] || typeof st.stock[itemId] !== 'object') st.stock[itemId] = {};
+  st.stock[itemId][key] = newVal;
+  saveLocal();
+  // その日付キーのみ送信
+  markUnsaved();
+  Cloud.post(
+    { action:'saveStock', stock: { [itemId]: { [key]: newVal } } },
+    () => markSaved(),
+    () => updateSyncBar('error')
+  );
+  renderStock();
+  showToast(`✏️ ${date}の入力を${newVal}個に修正しました`);
+}
+
+function deleteStockHistoryEntry(itemId, date) {
+  const dn = st.deviceName;
+  if (!dn) return;
+  if (!confirm(`${date}の入力（${dn}）を削除しますか？`)) return;
+  const key = dn + '_' + date;
+  if (st.stock && st.stock[itemId] && typeof st.stock[itemId] === 'object') {
+    delete st.stock[itemId][key];
+  }
+  saveLocal();
+  markUnsaved();
+  // GAS側にもこのキーを消してもらうため、専用の削除リクエストを送る
+  Cloud.post(
+    { action:'saveStock', stock: {}, isDelete: true, deletedKeys: { [itemId]: [key] } },
+    () => markSaved(),
+    () => updateSyncBar('error')
+  );
+  renderStock();
+  showToast(`🗑 ${date}の入力を削除しました`);
 }
 
 function deleteStockItem(itemId, colorName) {
@@ -2945,7 +3020,12 @@ function applyCloudData(json, forceShiftAttend) {
     const localStock = st.stock || {};
     const stockInputFocused = !!(document.activeElement && document.activeElement.classList.contains('stock-num-input'));
 
-    // 自端末の今日分を退避（入力中・未送信に関わらず常に保護）
+    console.log('[stock] クラウドデータ:', JSON.stringify(json.stock));
+    console.log('[stock] ローカルデータ:', JSON.stringify(localStock));
+    console.log('[stock] フォーカス中:', stockInputFocused);
+    console.log('[stock] 削除済みID:', [..._stockDeletedIds]);
+
+    // 自端末の今日分を退避
     const myLocal = {};
     Object.entries(localStock).forEach(([itemId, entry]) => {
       if (dn && entry && typeof entry === 'object') {
@@ -2954,15 +3034,15 @@ function applyCloudData(json, forceShiftAttend) {
       }
     });
 
-    // 入力欄にフォーカス中はst.stock自体を更新しない
     if (!stockInputFocused) {
       st.stock = {};
       Object.entries(json.stock).forEach(([itemId, entry]) => {
-        // 明示的に削除されたitemIdはスキップ（_stockDeletedIdsで管理）
-        if (_stockDeletedIds.has(itemId)) return;
+        if (_stockDeletedIds.has(itemId)) {
+          console.log('[stock] 削除済みとしてスキップ:', itemId);
+          return;
+        }
         st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
       });
-      // 自端末の今日分を復元（ローカル優先）
       if (dn) {
         const dayKey = dn + '_' + today;
         Object.entries(myLocal).forEach(([itemId, localVal]) => {
@@ -2970,6 +3050,7 @@ function applyCloudData(json, forceShiftAttend) {
           st.stock[itemId][dayKey] = localVal;
         });
       }
+      console.log('[stock] 反映後のローカル:', JSON.stringify(st.stock));
     }
   }
 }
