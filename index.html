@@ -482,6 +482,11 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
     <div class="f12 text-muted mb8">操作方法・トラブルシューティングを確認できます</div>
     <button class="btn-sm" onclick="window.open('https://gitoppo.github.io/smart-sintyokuAPP/manual_field.html','_blank')" style="width:100%;padding:14px;font-size:16px">📖 取扱説明書を開く</button>
   </div>
+  <div class="card mt8" style="background:#0f1c2e">
+    <div class="card-title mb8">📦 このアプリのバージョン</div>
+    <div id="appVersionDisplay" style="font-size:13px;color:var(--text);font-family:monospace"></div>
+    <div class="f12 text-muted mt8">この画面で読み込まれているコードの更新日時です。更新が反映されているか確認したい時にご覧ください。</div>
+  </div>
 </div>
 
 <!-- 進捗レポートボトムシート -->
@@ -606,7 +611,19 @@ window.addEventListener('DOMContentLoaded', () => {
   renderAll();
   startPoll();
   if (gasUrl) pullFromCloud();
+  showAppVersion();
 });
+
+// ============================================================
+// アプリバージョン表示（設定タブ）
+// ============================================================
+// 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
+const APP_VERSION_NOTE = 'ストック：日付ごとの入力履歴を編集・削除できる機能を追加';
+
+function showAppVersion() {
+  const el = document.getElementById('appVersionDisplay');
+  if (el) el.textContent = document.lastModified + ' - ' + APP_VERSION_NOTE;
+}
 
 // ============================================================
 // タブ切替
