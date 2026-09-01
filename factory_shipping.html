@@ -617,7 +617,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '出荷履歴のアーカイブ機能を新設（外部保管庫へ退避）、材料在庫アーカイブも本体シートから外部保管庫へ変更';
+const APP_VERSION_NOTE = '①タブに「📦納品書印刷済み」バッジを新設（手動解除式）。印刷対象に発行済みパレットが混ざっていたら印刷前に警告するよう変更';
 
 // ===== 状態 =====
 let st = {
@@ -1774,7 +1774,10 @@ function renderPallets(){
       <div class="palletBody">
         ${rowsHTML}
         ${totalCases>0?`<div class="pallet-total">合計箱数: ${totalCases}箱</div>`:''}
-      </div>${p.printTarget===false?'<div style="background:#fff3cd;color:#856404;font-size:11px;padding:4px 8px;">⚠ このパレットは印刷対象から除外されています（積み増し中など）</div>':''}${p.checklistPrinted?'<div style="background:#e2f0d9;color:#385723;font-size:11px;padding:4px 8px;">✅ チェックリスト印刷済み</div>':''}
+      </div>${p.printTarget===false?'<div style="background:#fff3cd;color:#856404;font-size:11px;padding:4px 8px;">⚠ このパレットは印刷対象から除外されています（積み増し中など）</div>':''}${p.checklistPrinted?'<div style="background:#e2f0d9;color:#385723;font-size:11px;padding:4px 8px;">✅ チェックリスト印刷済み</div>':''}${p.deliveryPrinted?`<div style="background:#cfe2ff;color:#084298;font-size:11px;padding:4px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>📦 納品書印刷済み（伝票 ${esc((p.deliveryPrintedSlipNos||[]).join('・'))}）</span>
+        <button class="btn-gray btn-sm" style="padding:2px 8px;" onclick="clearDeliveryPrinted(${pi})">解除</button>
+      </div>`:''}
     </div>`;
   }).join('');
 }
@@ -1784,6 +1787,16 @@ function togglePalletPrintTarget(pi,checked){
   if(!st.pallets[pi]) return;
   st.pallets[pi].printTarget = checked;
   saveLocalState(); renderPallets(); debounceWorkSave();
+}
+// 「納品書印刷済み」バッジの手動解除（パレットを次のロットで使い回す場合など）。
+// 自動解除にすると編集経路（addPalletRow/onPalletChange等）全てにフック追加が必要になり実装漏れのリスクが増えるため、
+// 手動解除のみとしている。解除し忘れても、次回印刷時に警告が出るだけで二重発行そのものは防げるため安全側に倒れる。
+function clearDeliveryPrinted(pi){
+  if(!st.pallets[pi]) return;
+  delete st.pallets[pi].deliveryPrinted;
+  delete st.pallets[pi].deliveryPrintedSlipNos;
+  saveLocalState(); renderPallets(); debounceWorkSave();
+  toast('印刷済み表示を解除しました');
 }
 function toggleBaraPrintTarget(checked){
   st.baraPrintTarget = checked;
@@ -2091,6 +2104,22 @@ async function openPrintDelivery(){
     return;
   }
 
+  // ③.5 既に納品書印刷済みのパレットが今回の印刷対象に混ざっていないか確認
+  // （パレットは手動削除しない限り残り続けるため、印刷済みに気付かず次のロットの印刷に巻き込んでしまう事故を防ぐ）
+  const alreadyPrinted = st.pallets.filter(p=>{
+    if(p.printTarget===false) return false;
+    if(!p.deliveryPrinted) return false;
+    return p.rows.some(r=>r.itemId && r.qty);
+  });
+  if(alreadyPrinted.length>0){
+    const lines = alreadyPrinted.map(p=>{
+      const pi = st.pallets.indexOf(p);
+      const nos = (p.deliveryPrintedSlipNos||[]).join('・')||'(番号不明)';
+      return `・パレット${pi+1}（伝票 ${nos} で発行済み）`;
+    }).join('\n');
+    if(!confirm('⚠ 既に納品書を発行済みのパレットが含まれています。\n\n'+lines+'\n\nこのまま印刷すると同じ品目が重複して発行されます。\n\n含めて印刷してよろしいですか？\n（含めたくない場合はキャンセルし、①タブで対象パレットの「🖨 印刷対象」を外すか削除してください）')) return;
+  }
+
   const grouped=groupRowsByGroup(allRows);
   const date=document.getElementById('shippingDate').value||today();
 
@@ -2123,18 +2152,30 @@ async function openPrintDelivery(){
 
   printDelivery(grouped, null, startNo);
 
+  // 印刷完了：今回発行された伝票番号の一覧（③.5の警告表示・重複チェックに使う）
+  const issuedSlipNos = grouped.map((g,gi)=>autoSlipNo(date,gi,startNo));
+
   // 印刷完了：今回印刷対象になったパレットの箱数チェックはリセットする
   // （パレット自体は削除されず残り続ける仕様のため、同じパレットを次のロットで使い回した際に
   // 　古いチェック内容が「チェック済み」として残ってしまうのを防ぐ）
   st.pallets.forEach(p=>{
     if(p.printTarget===false) return;
+    // 今回の印刷に含まれたパレットに「納品書印刷済み」の印を付ける（手動で解除するまで残る）
+    if(p.rows.some(r=>r.itemId && r.qty)){
+      p.deliveryPrinted = true;
+      p.deliveryPrintedSlipNos = issuedSlipNos;
+    }
     p.rows.forEach(r=>{
       if(!r.itemId) return;
       delete _checkVals[checkKey_(p.id, r.itemId)];
     });
   });
   saveCheckValsToLocal();
+  // deliveryPrintedは他端末とも共有する必要があるパレット本体のデータのため、
+  // チェックリスト印刷済み（checklistPrinted）と同様にsaveLocalState+debounceWorkSaveで同期する
+  saveLocalState();
   renderPallets();
+  debounceWorkSave();
 }
 
 // ===== 手入力納品書（品目マスタ未登録のイレギュラー品用） =====
