@@ -618,7 +618,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = 'ストック：日付ごとの入力履歴を編集・削除できる機能を追加';
+const APP_VERSION_NOTE = '②個人タブ：日付ごとの入力履歴を編集・削除できる機能を追加';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -1260,13 +1260,99 @@ function renderP2SheetBody(g) {
           <div style="font-size:12px;color:#f87171">全端末</div>
           <div style="font-size:30px;font-weight:700;color:#f87171">${r.totalVal}</div>
         </div>
-        <div style="text-align:center">
-          <div style="font-size:12px;color:#fbbf24">自分累計</div>
+        <div style="text-align:center;cursor:pointer" onclick="toggleP2History('${planId}')">
+          <div style="font-size:12px;color:#fbbf24">自分累計 ▾</div>
           <div style="font-size:30px;font-weight:700;color:#fbbf24">${r.myTotalVal}</div>
         </div>
       </div>
-    </div>`;
+    </div>
+    <div id="p2-history-${planId}" style="display:none;padding:6px 4px 10px 68px"></div>`;
   }).join('');
+}
+
+function toggleP2History(planId) {
+  const el = document.getElementById('p2-history-' + planId);
+  if (!el) return;
+  if (el.style.display === 'block') {
+    el.style.display = 'none';
+    return;
+  }
+  const dn = st.deviceName;
+  const prog = st.progress[planId] || {};
+  const postDone = prog.postDone || {};
+  // 自分の日付キーのみ抽出（端末名_日付 形式）
+  const myEntries = Object.entries(postDone)
+    .filter(([k]) => dn && k.startsWith(dn + '_'))
+    .map(([k, v]) => ({ key: k, date: k.slice(dn.length + 1), val: toNum(v) }))
+    .sort((a, b) => a.date < b.date ? 1 : -1); // 新しい日付が上
+
+  if (myEntries.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--muted)">入力履歴がありません</div>';
+  } else {
+    el.innerHTML = myEntries.map(e => `
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid #16233a">
+        <div style="width:90px;color:var(--muted)">${esc(e.date)}</div>
+        <input type="number" min="0" value="${e.val}" id="p2-hist-${planId}-${esc(e.date)}"
+          style="width:60px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:#0a1220;color:var(--text);font-size:12px">
+        <span style="color:var(--muted)">個</span>
+        <button onclick="saveP2HistoryEdit('${planId}','${esc(e.date)}')" style="padding:3px 8px;border-radius:4px;border:1px solid #0891b2;background:transparent;color:#67e8f9;font-size:11px;cursor:pointer">保存</button>
+        <button onclick="deleteP2HistoryEntry('${planId}','${esc(e.date)}')" style="padding:3px 8px;border-radius:4px;border:1px solid var(--r);background:transparent;color:var(--r);font-size:11px;cursor:pointer">削除</button>
+      </div>
+    `).join('');
+  }
+  el.style.display = 'block';
+}
+
+function saveP2HistoryEdit(planId, date) {
+  const dn = st.deviceName;
+  if (!dn) return;
+  const inp = document.getElementById(`p2-hist-${planId}-${date}`);
+  if (!inp) return;
+  const newVal = Math.max(0, toNum(inp.value));
+  const key = dn + '_' + date;
+  if (!st.progress[planId]) st.progress[planId] = { preDone: 0, postDone: {} };
+  if (!st.progress[planId].postDone) st.progress[planId].postDone = {};
+  const prevVal = toNum(st.progress[planId].postDone[key]);
+  st.progress[planId].postDone[key] = newVal;
+  saveLocal();
+  markUnsaved();
+  Cloud.savePlansProgress(() => markSaved(), () => updateSyncBar('error'));
+  // 操作ログに記録
+  const plan = st.plans.find(p => p.id === planId);
+  const item = plan ? st.itemMaster.find(it => it.id === plan.itemId) : null;
+  if (item) {
+    logOperation({
+      planId, itemName: dispN(item), color: dispC(item),
+      proc: 'post_edit', prevVal, newVal
+    });
+  }
+  renderPersonal();
+  showToast(`✏️ ${date}の入力を${newVal}個に修正しました`);
+}
+
+function deleteP2HistoryEntry(planId, date) {
+  const dn = st.deviceName;
+  if (!dn) return;
+  if (!confirm(`${date}の入力（${dn}）を削除しますか？`)) return;
+  const key = dn + '_' + date;
+  let prevVal = 0;
+  if (st.progress[planId] && st.progress[planId].postDone) {
+    prevVal = toNum(st.progress[planId].postDone[key]);
+    delete st.progress[planId].postDone[key];
+  }
+  saveLocal();
+  markUnsaved();
+  Cloud.savePlansProgress(() => markSaved(), () => updateSyncBar('error'));
+  const plan = st.plans.find(p => p.id === planId);
+  const item = plan ? st.itemMaster.find(it => it.id === plan.itemId) : null;
+  if (item) {
+    logOperation({
+      planId, itemName: dispN(item), color: dispC(item),
+      proc: 'post_edit', prevVal, newVal: 0
+    });
+  }
+  renderPersonal();
+  showToast(`🗑 ${date}の入力を削除しました`);
 }
 
 function openP2Sheet(groupName) {
