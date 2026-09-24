@@ -278,7 +278,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
   <button class="tab" onclick="showTab('tabMaterial')">②使用<br>材料</button>
   <button class="tab" onclick="showTab('tabHistory')">③出荷<br>履歴</button>
   <button class="tab" onclick="showTab('tabInvoice')">④請求書</button>
-  <button class="tab" onclick="showTab('tabMaterialStock')">⑤材料<br>在庫</button>
+  <button class="tab" onclick="showTab('tabMaterialStock')">⑤材料<br>在庫<span id="materialStockWarnBadge" style="display:none;background:#c0392b;color:#fff;border-radius:50%;padding:1px 5px;font-size:10px;margin-left:2px;vertical-align:top;">⚠</span></button>
   <button class="tab" onclick="showTab('tabSettings')">⚙️<br>設定</button>
 </div>
 
@@ -617,7 +617,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '①タブに「📦納品書印刷済み」バッジを新設（手動解除式）。印刷対象に発行済みパレットが混ざっていたら印刷前に警告するよう変更';
+const APP_VERSION_NOTE = '材料在庫がマイナスになる出荷への警告（印刷直前）と、タブバーへの警告バッジを追加';
 
 // ===== 状態 =====
 let st = {
@@ -2121,6 +2121,39 @@ async function openPrintDelivery(){
   }
 
   const grouped=groupRowsByGroup(allRows);
+
+  // ③.6 この出荷によって材料在庫がマイナスになる品目グループが無いか確認
+  // （入荷登録の漏れなど、原因を問わず「客先へ渡す直前」に必ず気づけるようにするための最終チェック。
+  //   現実には在庫がマイナスになることはあり得ないため、マイナスになる＝入力ミスのサイン）
+  {
+    const msSettings = st.materialStock.settings || {};
+    const msEnabled = msSettings.enabledGroups || [];
+    if(msSettings.baselineDate && msEnabled.length){
+      const msMap = {};
+      computeMaterialStock().forEach(r=>{ msMap[r.group] = r; }); // {group, dispName, qty}（現時点の在庫）
+
+      const shipQtyByGroup = {};
+      grouped.forEach(g=>{
+        if(g.isRepair) return; // 補修分は在庫計算からそもそも除外されている
+        (g.rows||[]).forEach(r=>{
+          shipQtyByGroup[g.groupName] = (shipQtyByGroup[g.groupName]||0) + (parseInt(r.qty)||0);
+        });
+      });
+
+      const warnLines = [];
+      Object.keys(shipQtyByGroup).forEach(gname=>{
+        const ms = msMap[gname];
+        if(!ms) return; // 材料在庫の管理対象外グループ
+        const after = ms.qty - shipQtyByGroup[gname];
+        if(after < 0) warnLines.push(`・${ms.dispName}：現在庫${ms.qty} → この出荷後 ${after}`);
+      });
+
+      if(warnLines.length>0){
+        if(!confirm('⚠ 以下の材料在庫が、この出荷によってマイナスになります。\n\n'+warnLines.join('\n')+'\n\n入荷登録の漏れなど、入力に誤りがないかご確認ください。\n\nこのまま印刷してよろしいですか？')) return;
+      }
+    }
+  }
+
   const date=document.getElementById('shippingDate').value||today();
 
   showLoading(true);
@@ -3315,18 +3348,31 @@ function renderMaterialStockTable(){
   const settings = st.materialStock.settings||{};
   if(!settings.baselineDate || !(settings.enabledGroups||[]).length){
     el.innerHTML = '<p style="color:#999;font-size:12px;padding:8px;">「⚙️ 対象グループ・起点在庫の設定」から設定してください</p>';
+    updateMaterialStockWarnBadge([]);
     return;
   }
   const rows = computeMaterialStock();
+  updateMaterialStockWarnBadge(rows);
+  const negRows = rows.filter(r=>r.qty<0);
   el.innerHTML = `
+    ${negRows.length>0?`<div style="background:#f8d7da;color:#842029;font-size:12px;padding:8px 10px;border-radius:4px;margin-bottom:8px;">⚠ 在庫がマイナスの品目があります。入荷登録の漏れなど、入力に誤りがないかご確認ください。<br>（現実には在庫がマイナスになることはあり得ないため、マイナス表示＝どこかの入力が間違っているサインです）</div>`:''}
     <table class="msStockTable">
       <thead><tr><th>品目グループ</th><th>現在庫数</th></tr></thead>
       <tbody>
-        ${rows.map(r=>`<tr><td style="text-align:left;">${esc(r.dispName)}</td><td class="${r.qty<0?'ms-qty-low':''}">${r.qty}</td></tr>`).join('')}
+        ${rows.map(r=>`<tr><td style="text-align:left;">${esc(r.dispName)}</td><td class="${r.qty<0?'ms-qty-low':''}">${r.qty<0?'⚠ ':''}${r.qty}</td></tr>`).join('')}
       </tbody>
     </table>
     <div style="font-size:11px;color:#999;margin-top:6px;">起点日：${esc(settings.baselineDate)}　更新：${today()}時点</div>
   `;
+}
+
+// タブバーの⑤材料在庫ボタンに、マイナス在庫がある間だけ警告バッジを出す。
+// ⑤タブを開いていなくても（①タブで印刷作業中などでも）気づけるようにするため。
+function updateMaterialStockWarnBadge(rows){
+  const badge = document.getElementById('materialStockWarnBadge');
+  if(!badge) return;
+  const hasNegative = (rows||[]).some(r=>r.qty<0);
+  badge.style.display = hasNegative ? 'inline-block' : 'none';
 }
 
 function populateMaterialGroupSelect(){
