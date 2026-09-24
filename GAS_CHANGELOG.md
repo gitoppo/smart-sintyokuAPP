@@ -64,4 +64,27 @@ GitHubへpushされないままApps Scriptにのみデプロイされていた�
 
 ---
 
+---
+
+### v3 - 2026年9月24日（事務アプリチャットで対応）
+
+**経緯**：③タブの履歴に、同一内容・同一発行時刻のチェックリスト記録が2〜3件重複して残る現象を確認。
+原因は`saveShipping_`（出荷履歴の保存。チェックリスト・納品書とも共通で使用）に、v1で`saveMaterialMovement_`
+に入れたのと同じ「応答の配達失敗による自動リトライで同一内容が何度も保存されてしまう」対策が
+入っておらず、リトライのたびに無条件で`appendRow`していたため。同じ観点で他の書き込み系関数
+（`saveItemMaster_`・`savePlansProgress_`・`saveAll_`・`saveStock_`・`saveShiftAttendance_`・
+`saveMaterialStockSettings_`・`saveShippingWork_`・`updateShipping_`・`deleteShipping_`・
+`deleteMaterialMovement_`・各種アーカイブ関数）も点検したが、いずれも全件上書き／キー単位マージ／
+id一致箇所の上書き・削除／サーバー最新状態からの再計算という作りのため、リトライされても結果が
+変わらず該当しないことを確認済み。
+
+- `saveShipping_`：`saveMaterialMovement_`と同じパターンで、同じidの行が既に存在する場合は
+  `appendRow`しない重複防止ロジックを追加 ［事務アプリチャット］
+
+**進捗アプリチャットへの申し送り**：`saveOperationLog_`（進捗ログの保存）にも同種の脆弱性
+（id自体が無く、無条件`appendRow`）が見つかりました。事務アプリ側からは呼び出していない機能のため
+今回は未対応です。進捗アプリ側で同様の重複が起きていないか、必要であれば同じパターンでの対策をご検討ください。
+
+---
+
 （以降、`.gs`を編集するたびに、ここへ追記してください）
