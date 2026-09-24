@@ -3,7 +3,9 @@
 // ============================================================
 //
 // ▼変更履歴管理（GAS_CHANGELOG.md）
-// 内部バージョン: v2  (2026-08-26)
+// 内部バージョン: v3  (2026-09-24)
+// v3: saveShipping_にid重複防止を追加（チェックリスト・納品書履歴が応答配達失敗の自動リトライで
+//     2〜3件重複登録される不具合の修正。saveMaterialMovement_と同じ対策パターン）
 //
 // 【重要】このファイルは出荷管理アプリ・進捗管理アプリの両方から共有されています。
 // 編集する前に、必ず GitHub から最新版を取得してください（古いローカルコピーを土台にしない）。
@@ -1032,10 +1034,21 @@ function saveShipping_(p) {
       headers = headers.concat(['type']);
     }
 
+    // 既存idの一覧を取得（応答の配達失敗による自動リトライで同一内容が何度もappendRowされ、
+    // チェックリスト・納品書の履歴が2〜3件ずつ重複登録されてしまう問題への対策。
+    // saveMaterialMovement_に既に入っている対策と同じもの）
+    const idColIdx = headers.indexOf('id');
+    const lastRow = sheet.getLastRow();
+    const existingIds = (idColIdx !== -1 && lastRow > 1)
+      ? sheet.getRange(2, idColIdx + 1, lastRow - 1, 1).getValues().map(function (row) { return String(row[0]); })
+      : [];
+
     const records = p.records || [];
     records.forEach(function (r) {
+      if (r.id && existingIds.indexOf(String(r.id)) !== -1) return; // 既に保存済みのidはスキップ
       const row = headers.map(function (h) { return (r[h] !== undefined && r[h] !== null) ? r[h] : ''; });
       sheet.appendRow(row);
+      if (r.id) existingIds.push(String(r.id)); // 同一リクエスト内でのid重複も念のため防ぐ
     });
     return ContentService
       .createTextOutput(JSON.stringify({ ok: true }))
