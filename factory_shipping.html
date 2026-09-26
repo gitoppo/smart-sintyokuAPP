@@ -626,7 +626,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '⑤材料在庫に「材料引き上げの記録漏れチェック」を新設（出荷日と入荷記録の突き合わせ、日付自動セット、引き上げ無しマーカー、タブバッジ）';
+const APP_VERSION_NOTE = '⑤材料在庫に「材料引き上げの記録漏れチェック」を新設。あわせて入荷登録成功時に「未確定」バナーが消えずに残る不具合を修正';
 
 // ===== 状態 =====
 let st = {
@@ -3490,6 +3490,7 @@ async function markNoArrival(date){
         toast('記録しました');
         st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==movement.id);
         saveLocalState();
+        renderPendingDeleteBanner();
       }
     }catch(e){ toast('通信エラー: '+e.message); }
     finally{ showLoading(false); }
@@ -3539,6 +3540,7 @@ async function addMaterialMovement(){
         toast('登録しました');
         st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==movement.id);
         saveLocalState();
+        renderPendingDeleteBanner(); // 未確定バナーを即座に消す（delete側と同じ挙動に揃える）
       }
     }catch(e){ toast('通信エラー: '+e.message); }
     finally{ showLoading(false); }
