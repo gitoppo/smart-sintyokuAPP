@@ -278,7 +278,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
   <button class="tab" onclick="showTab('tabMaterial')">②使用<br>材料</button>
   <button class="tab" onclick="showTab('tabHistory')">③出荷<br>履歴</button>
   <button class="tab" onclick="showTab('tabInvoice')">④請求書</button>
-  <button class="tab" onclick="showTab('tabMaterialStock')">⑤材料<br>在庫<span id="materialStockWarnBadge" style="display:none;background:#c0392b;color:#fff;border-radius:50%;padding:1px 5px;font-size:10px;margin-left:2px;vertical-align:top;">⚠</span></button>
+  <button class="tab" onclick="showTab('tabMaterialStock')">⑤材料<br>在庫<span id="materialStockWarnBadge" style="display:none;background:#c0392b;color:#fff;border-radius:50%;padding:1px 5px;font-size:10px;margin-left:2px;vertical-align:top;">⚠</span><span id="materialArrivalGapBadge" style="display:none;background:#e67e22;color:#fff;border-radius:50%;padding:1px 5px;font-size:10px;margin-left:2px;vertical-align:top;"></span></button>
   <button class="tab" onclick="showTab('tabSettings')">⚙️<br>設定</button>
 </div>
 
@@ -415,6 +415,15 @@ tr:nth-child(even) td{background:#f9f9f9;}
       <button class="btn-warn btn-sm no-print" onclick="confirmMaterialStockBaseline()">📌 現在庫を新しい起点として確定</button>
     </div>
     <div id="materialStockTable"></div>
+  </div>
+
+  <div class="card">
+    <div class="cardTitle">📥 材料引き上げの記録漏れチェック</div>
+    <div style="font-size:12px;color:#666;margin-bottom:10px;">
+      管理対象グループの品目を出荷した日なのに、入荷記録が無い日を自動で洗い出します。<br>
+      （1回の引き上げで複数種類を持ち帰った場合、その一部だけの記録漏れは検知できません）
+    </div>
+    <div id="materialArrivalGapList"></div>
   </div>
 
   <div class="card">
@@ -617,7 +626,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '材料在庫がマイナスになる出荷への警告（印刷直前）と、タブバーへの警告バッジを追加';
+const APP_VERSION_NOTE = '⑤材料在庫に「材料引き上げの記録漏れチェック」を新設（出荷日と入荷記録の突き合わせ、日付自動セット、引き上げ無しマーカー、タブバッジ）';
 
 // ===== 状態 =====
 let st = {
@@ -679,7 +688,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   renderBara();
   renderMaterial();
   renderHistory();
-  renderMaterialStockTable();
+  renderMaterialStockTable(); renderMaterialArrivalGapList();
   renderMaterialMovementList();
   populateMaterialGroupSelect();
   if(settings.gasUrl){ loadFromGas(); startPolling(); startPendingSyncRetry(); }
@@ -914,7 +923,7 @@ async function _loadFromGasCore(){
     }
   }
   renderItemTiles(); renderPallets(); renderBara(); renderMaterial(); renderHistory();
-  renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList(); populateMaterialGroupSelect();
 }
 
 // 起動時・手動リロードボタンから呼ばれる入口。
@@ -3375,6 +3384,120 @@ function updateMaterialStockWarnBadge(rows){
   badge.style.display = hasNegative ? 'inline-block' : 'none';
 }
 
+// ===== 材料引き上げの記録漏れチェック =====
+// 目的：③出荷履歴（＝管理対象グループの品目を出荷した日）に対応する入荷記録が
+// materialMovementsに1件も無い日を「記録漏れの疑いがある日」として洗い出す。
+// 注意：あくまで「その日に何か1件でも入荷記録があるか」という日単位の粗い判定。
+// 1回の引き上げで複数種類の材料を持ち帰り、その一部だけが記録漏れになるケースは検知できない
+// （ヒアリング済み：漏れる時はその日まるごと漏れることが多いとのことなので、この粒度で運用する）
+function computeMaterialArrivalGaps(){
+  const settings = st.materialStock.settings || {};
+  const enabled = settings.enabledGroups || [];
+  if(!enabled.length) return [];
+  const baselineDate = settings.baselineDate || '0000-00-00';
+  const todayStr = today();
+
+  const groupDispMap = {};
+  getMaterialGroupList().forEach(g=>groupDispMap[g.name]=g.dispName);
+
+  // 管理対象グループの品目を含む出荷日を集める（チェックリストは実出荷ではないため除外）
+  const byDate = {}; // date -> Set(groupName)
+  st.deliveryHistory.forEach(r=>{
+    if(isChecklistRecord(r)) return;
+    if(!r.shippingDate) return;
+    (r.slips||[]).forEach(s=>{
+      if(!enabled.includes(s.groupName)) return;
+      if(!byDate[r.shippingDate]) byDate[r.shippingDate] = new Set();
+      byDate[r.shippingDate].add(s.groupName);
+    });
+  });
+
+  const movementDates = new Set(st.materialStock.movements.map(m=>m.date));
+
+  return Object.keys(byDate)
+    .filter(d=> d > baselineDate && d <= todayStr && !movementDates.has(d))
+    .sort((a,b)=>b.localeCompare(a)) // 新しい日付が上
+    .map(d=>({ date:d, groups:[...byDate[d]].map(g=>groupDispMap[g]||g) }));
+}
+
+function renderMaterialArrivalGapList(){
+  const el = document.getElementById('materialArrivalGapList');
+  if(!el) return;
+  const settings = st.materialStock.settings || {};
+  if(!settings.baselineDate || !(settings.enabledGroups||[]).length){
+    el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">「⚙️ 対象グループ・起点在庫の設定」から設定すると、記録漏れチェックが有効になります</p>';
+    updateMaterialArrivalGapBadge([]);
+    return;
+  }
+  const gaps = computeMaterialArrivalGaps();
+  updateMaterialArrivalGapBadge(gaps);
+  if(gaps.length===0){
+    el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">記録漏れの疑いがある日はありません</p>';
+    return;
+  }
+  el.innerHTML = gaps.map(g=>`
+    <div class="msMoveRow" style="align-items:center;flex-wrap:wrap;">
+      <span>📅 ${esc(g.date)}　出荷あり：${esc(g.groups.join('・'))}</span>
+      <span style="display:flex;gap:6px;">
+        <button class="btn-primary btn-sm" onclick="goRegisterArrivalForDate('${g.date}')">入荷を登録</button>
+        <button class="btn-gray btn-sm" onclick="markNoArrival('${g.date}')">今回は引き上げ無し</button>
+      </span>
+    </div>
+  `).join('');
+}
+
+// タブバーに未処理件数バッジを表示する（⑤材料在庫の「マイナス在庫」警告バッジとは別枠・オレンジ表示）
+function updateMaterialArrivalGapBadge(gaps){
+  const badge = document.getElementById('materialArrivalGapBadge');
+  if(!badge) return;
+  const n = (gaps||[]).length;
+  if(n>0){ badge.style.display='inline-block'; badge.textContent = n>9?'9+':String(n); }
+  else{ badge.style.display='none'; badge.textContent=''; }
+}
+
+// 「入荷を登録」：既存の入荷登録フォームまでスクロールし、日付欄に対象日を自動セットする。
+// 日付欄を直し忘れて「今日の日付」のまま登録してしまう事故を防ぐのが狙い
+// （現品票を目視で探す作業を「今日っぽい札を記憶で探す」から「◯月◯日の札を探す」に変えられる）
+function goRegisterArrivalForDate(date){
+  const dateEl = document.getElementById('msMoveDate');
+  const groupEl = document.getElementById('msMoveGroup');
+  dateEl.value = date;
+  document.getElementById('msMoveType').value = '入荷';
+  groupEl.scrollIntoView({behavior:'smooth', block:'center'});
+  groupEl.focus();
+  toast(`日付欄に${date}をセットしました。品目グループを選んで登録してください`);
+}
+
+// 「今回は引き上げ無し」：数量0・種別'引き上げ無し'として記録するだけの軽いマーカー。
+// typeが'入荷'/'返品'のどちらにも一致しないため、在庫計算（computeMaterialStock）には一切影響しない。
+async function markNoArrival(date){
+  if(!confirm(`${date}は材料の引き上げが無かった、として記録します。よろしいですか？`)) return;
+  const movement = {
+    id:'mm_'+Date.now(), date, type:'引き上げ無し', group:'', qty:0, memo:'',
+    deviceName:settings.deviceName||'', timestamp:new Date().toISOString()
+  };
+  st.materialStock.movements.push(movement);
+  if(!st.materialStock.pendingAdds.includes(movement.id)) st.materialStock.pendingAdds.push(movement.id);
+  saveLocalState();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList();
+
+  if(settings.gasUrl){
+    showLoading(true);
+    try{
+      const res = await gasPost({action:'saveMaterialMovement', movement});
+      if(!res || !res.ok) toast('GAS保存エラー: '+(res?res.error:'不明'));
+      else{
+        toast('記録しました');
+        st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==movement.id);
+        saveLocalState();
+      }
+    }catch(e){ toast('通信エラー: '+e.message); }
+    finally{ showLoading(false); }
+  } else {
+    toast('記録しました（ローカルのみ）');
+  }
+}
+
 function populateMaterialGroupSelect(){
   const sel = document.getElementById('msMoveGroup');
   if(!sel) return;
@@ -3403,7 +3526,7 @@ async function addMaterialMovement(){
   // 他の端末で正しく削除・アーカイブされたデータまで誤って復活させてしまうことを防げる。
   if(!st.materialStock.pendingAdds.includes(movement.id)) st.materialStock.pendingAdds.push(movement.id);
   saveLocalState();
-  renderMaterialStockTable(); renderMaterialMovementList();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList();
   document.getElementById('msMoveQty').value='';
   document.getElementById('msMoveMemo').value='';
 
@@ -3435,12 +3558,20 @@ function renderMaterialMovementList(){
   }
   const groupDispMap = {};
   getMaterialGroupList().forEach(g=>groupDispMap[g.name]=g.dispName);
-  el.innerHTML = list.map(m=>`
+  el.innerHTML = list.map(m=>{
+    if(m.type==='引き上げ無し'){
+      return `
+    <div class="msMoveRow">
+      <span>${esc(m.date)}　🚫 引き上げ無し（確認済み）</span>
+      <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
+    </div>`;
+    }
+    return `
     <div class="msMoveRow">
       <span>${esc(m.date)}　${m.type==='入荷'?'📥':'📤'}${esc(m.type)}　${esc(groupDispMap[m.group]||m.group)}　×${m.qty}${m.memo?'　'+esc(m.memo):''}</span>
       <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ⑤タブに、未確定の削除件数を表示する（0件なら非表示）
@@ -3468,7 +3599,7 @@ async function deleteMaterialMovementUI(id){
   // このリストに残っている限りリロード時に復活させず、裏で自動的に削除を再試行し続ける
   if(!st.materialStock.pendingDeletes.includes(id)) st.materialStock.pendingDeletes.push(id);
   saveLocalState();
-  renderMaterialStockTable(); renderMaterialMovementList();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList();
   if(settings.gasUrl){
     try{
       const res = await gasPost({action:'deleteMaterialMovement', id});
@@ -3556,7 +3687,7 @@ async function saveMaterialStockSettingsFromModal(){
   st.materialStock.settings = newSettings;
   saveLocalState();
   closeMaterialStockSettings();
-  renderMaterialStockTable(); populateMaterialGroupSelect();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); populateMaterialGroupSelect();
 
   if(settings.gasUrl){
     showLoading(true);
@@ -3598,7 +3729,7 @@ async function confirmMaterialStockBaseline(){
     st.materialStock.settings = newSettings;
     toast('起点を更新しました');
     saveLocalState();
-    renderMaterialStockTable(); renderMaterialMovementList(); populateMaterialGroupSelect();
+    renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList(); populateMaterialGroupSelect();
   }catch(e){ toast('通信エラー: '+e.message); }
   finally{ showLoading(false); }
 }
@@ -3623,7 +3754,7 @@ async function cleanupOldMaterialMovements(){
     if(res && res.ok){
       st.materialStock.movements = st.materialStock.movements.filter(m=>!(m.date && m.date<=cutoffStr));
       saveLocalState();
-      renderMaterialStockTable(); renderMaterialMovementList();
+      renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList();
       toast(`${res.archivedCount||0}件をアーカイブしました`);
     } else {
       toast('アーカイブ処理でエラーが出ました: '+(res?res.error:'不明なエラー'));
