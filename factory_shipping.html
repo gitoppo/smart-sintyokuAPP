@@ -626,7 +626,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '⑤材料在庫に「材料引き上げの記録漏れチェック」を新設。あわせて入荷登録成功時に「未確定」バナーが消えずに残る不具合を修正';
+const APP_VERSION_NOTE = '記録漏れチェックが「返品」だけでも解消扱いになっていた不具合を修正（「入荷」「引き上げ無し」のみで判定）';
 
 // ===== 状態 =====
 let st = {
@@ -3412,7 +3412,13 @@ function computeMaterialArrivalGaps(){
     });
   });
 
-  const movementDates = new Set(st.materialStock.movements.map(m=>m.date));
+  // 「返品」だけが記録されていても、肝心の「入荷」が漏れている可能性は消えないため、
+  // 記録漏れが解消したとみなすのは「入荷」または「引き上げ無し（確認済み）」がある日だけに限定する
+  const movementDates = new Set(
+    st.materialStock.movements
+      .filter(m=>m.type==='入荷' || m.type==='引き上げ無し')
+      .map(m=>m.date)
+  );
 
   return Object.keys(byDate)
     .filter(d=> d > baselineDate && d <= todayStr && !movementDates.has(d))
