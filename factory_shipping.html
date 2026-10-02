@@ -626,7 +626,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '入荷・返品登録の自動再試行（20秒おき）が成功した際、「未確定」バナーが消えずに残る不具合を修正';
+const APP_VERSION_NOTE = '⑤材料在庫の入荷・返品履歴に、端末名・入力日時を表示するよう変更（データ自体は元々保存済みだった）';
 
 // ===== 状態 =====
 let st = {
@@ -3566,18 +3566,27 @@ function renderMaterialMovementList(){
   }
   const groupDispMap = {};
   getMaterialGroupList().forEach(g=>groupDispMap[g.name]=g.dispName);
+  // 端末名（settings.deviceName）・入力日時（timestamp）は、登録時（addMaterialMovement／markNoArrival）に
+  // 既に各movementへ保存済みのデータ。これまで一覧に表示していなかっただけなので、ここで表示に加える。
   el.innerHTML = list.map(m=>{
+    const deviceInfo = `<div style="font-size:11px;color:#999;margin-top:2px;">端末: ${esc(m.deviceName||'—')}　入力: ${toJST(m.timestamp)}</div>`;
     if(m.type==='引き上げ無し'){
       return `
-    <div class="msMoveRow">
-      <span>${esc(m.date)}　🚫 引き上げ無し（確認済み）</span>
-      <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
+    <div class="msMoveRow" style="flex-direction:column;align-items:stretch;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span>${esc(m.date)}　🚫 引き上げ無し（確認済み）</span>
+        <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
+      </div>
+      ${deviceInfo}
     </div>`;
     }
     return `
-    <div class="msMoveRow">
-      <span>${esc(m.date)}　${m.type==='入荷'?'📥':'📤'}${esc(m.type)}　${esc(groupDispMap[m.group]||m.group)}　×${m.qty}${m.memo?'　'+esc(m.memo):''}</span>
-      <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
+    <div class="msMoveRow" style="flex-direction:column;align-items:stretch;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span>${esc(m.date)}　${m.type==='入荷'?'📥':'📤'}${esc(m.type)}　${esc(groupDispMap[m.group]||m.group)}　×${m.qty}${m.memo?'　'+esc(m.memo):''}</span>
+        <button class="btn-danger btn-sm" onclick="deleteMaterialMovementUI('${m.id}')">✕</button>
+      </div>
+      ${deviceInfo}
     </div>`;
   }).join('');
 }
