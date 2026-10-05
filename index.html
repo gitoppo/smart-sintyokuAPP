@@ -626,7 +626,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '余裕計算除外：⑥のスイッチに「切り替え中」表示、除外中の品目を⑥上部・①アラートバー・③に表示';
+const APP_VERSION_NOTE = '通信タイムアウトを25秒→10秒に戻す（10/5の進捗の欠落への対処）';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -3139,14 +3139,16 @@ function saveLocal() {
 // ============================================================
 // クラウド通信
 // ============================================================
-// GASへの通信のタイムアウト（ミリ秒）。GASの応答が10秒前後かかることがあるため25秒とする（事務アプリと同じ）
-const GAS_TIMEOUT_MS = 25000;
+// GASへの通信のタイムアウト（ミリ秒）。
+// 10/5の13:54に25秒へ延長したところ、14時以降に3台の進捗の保存が欠落したため、10秒に戻した。
+// （9月は10秒で運用し欠落は約0.7%だった。因果関係は未確定だが、安全側に戻している）
+const GAS_TIMEOUT_MS = 10000;
 
 const Cloud = {
   async get() {
     if (!gasUrl) return null;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // 25秒タイムアウト
+    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // タイムアウト
     try {
       const r = await fetch(`${gasUrl}?action=getAll&v=${Date.now()}`, {
         method:'GET', redirect:'follow', cache:'no-store', signal: controller.signal
@@ -3160,7 +3162,7 @@ const Cloud = {
   async post(payload, cb, errCb, _retried) {
     if (!gasUrl) { if (errCb) errCb('No GAS URL'); return; }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // 25秒タイムアウト
+    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // タイムアウト
     try {
       const body = JSON.stringify(payload);
       const r = await fetch(`${gasUrl}?v=${Date.now()}`, {
