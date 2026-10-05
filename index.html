@@ -621,7 +621,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '③計画：余裕計算除外品目の完了済み計画に「納品済みなら削除」の案内を表示';
+const APP_VERSION_NOTE = '通信タイムアウトを10秒→25秒に延長（同期失敗の多発対策）・デバッグログを削除';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -3083,25 +3083,28 @@ function saveLocal() {
 // ============================================================
 // クラウド通信
 // ============================================================
+// GASへの通信のタイムアウト（ミリ秒）。GASの応答が10秒前後かかることがあるため25秒とする（事務アプリと同じ）
+const GAS_TIMEOUT_MS = 25000;
+
 const Cloud = {
   async get() {
     if (!gasUrl) return null;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
+    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // 25秒タイムアウト
     try {
       const r = await fetch(`${gasUrl}?action=getAll&v=${Date.now()}`, {
         method:'GET', redirect:'follow', cache:'no-store', signal: controller.signal
       });
       return await r.json();
     } catch(e) {
-      if (e.name === 'AbortError') console.warn('Cloud.get: タイムアウト（10秒）');
+      if (e.name === 'AbortError') console.warn(`Cloud.get: タイムアウト（${GAS_TIMEOUT_MS / 1000}秒）`);
       return null;
     } finally { clearTimeout(timer); }
   },
   async post(payload, cb, errCb, _retried) {
     if (!gasUrl) { if (errCb) errCb('No GAS URL'); return; }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
+    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // 25秒タイムアウト
     try {
       const body = JSON.stringify(payload);
       const r = await fetch(`${gasUrl}?v=${Date.now()}`, {
@@ -3122,7 +3125,7 @@ const Cloud = {
       }
     } catch(e) {
       if (e.name === 'AbortError') {
-        console.warn('Cloud.post: タイムアウト（10秒）', payload.action);
+        console.warn(`Cloud.post: タイムアウト（${GAS_TIMEOUT_MS / 1000}秒）`, payload.action);
         if (errCb) errCb('timeout');
       } else {
         if (errCb) errCb(e.message);
@@ -3253,11 +3256,6 @@ function applyCloudData(json, forceShiftAttend) {
     const localStock = st.stock || {};
     const stockInputFocused = !!(document.activeElement && document.activeElement.classList.contains('stock-num-input'));
 
-    console.log('[stock] クラウドデータ:', JSON.stringify(json.stock));
-    console.log('[stock] ローカルデータ:', JSON.stringify(localStock));
-    console.log('[stock] フォーカス中:', stockInputFocused);
-    console.log('[stock] 削除済みID:', [..._stockDeletedIds]);
-
     // 自端末の今日分を退避
     const myLocal = {};
     Object.entries(localStock).forEach(([itemId, entry]) => {
@@ -3270,10 +3268,7 @@ function applyCloudData(json, forceShiftAttend) {
     if (!stockInputFocused) {
       st.stock = {};
       Object.entries(json.stock).forEach(([itemId, entry]) => {
-        if (_stockDeletedIds.has(itemId)) {
-          console.log('[stock] 削除済みとしてスキップ:', itemId);
-          return;
-        }
+        if (_stockDeletedIds.has(itemId)) return;
         st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
       });
       if (dn) {
@@ -3283,7 +3278,6 @@ function applyCloudData(json, forceShiftAttend) {
           st.stock[itemId][dayKey] = localVal;
         });
       }
-      console.log('[stock] 反映後のローカル:', JSON.stringify(st.stock));
     }
   }
 }
