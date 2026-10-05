@@ -109,7 +109,11 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .item-color{flex:1;color:var(--muted)}
 .item-ph{color:var(--t);min-width:70px;text-align:right}
 .item-ex-btn{flex-shrink:0;padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
-.item-ex-btn.on{border-color:#d97706;background:#2a1a05;color:#fbbf24}
+.item-ex-btn.on{border-color:#d97706;background:#d97706;color:#1a1000}
+.item-ex-btn.pending{border-color:var(--b);background:#0c2a35;color:#67e8f9;cursor:wait}
+.item-row.ex-on{background:rgba(217,119,6,.12)}
+#item-ex-summary{margin:0 0 10px;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.6;background:#111e2e;border:1px solid var(--border);color:var(--muted)}
+#item-ex-summary.has{background:#2a1a05;border-color:#d97706;color:#fbbf24}
 /* 設定タブ */
 .setting-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .setting-label{font-size:13px;color:var(--muted);min-width:80px}
@@ -448,6 +452,7 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
     <div class="f12 text-muted mb8">列順: 品目名, カラー, 前工程時間(分/個), 後工程時間(分/個), シート品番, カット幅, カット長, グループ, 単価, 表示名, 表示カラー, 箱入数<br>※表示名・表示カラーは省略可（空欄時は品目名・カラーをそのまま使用）<br>※「余裕計算除外」の設定は下の一覧のスイッチで切り替えます。再インポート時は品目名＋カラーが同じ品目のみ設定が引き継がれます<br>※Excel（.xlsx）・CSV（.csv）どちらも対応。Excelは1シート目を読み込みます。</div>
     <input type="file" id="csv-file" accept=".csv,.xlsx" onchange="importCsv(this)" style="font-size:13px;color:var(--text)">
   </div>
+  <div id="item-ex-summary"></div>
   <div id="item-list"></div>
 </div>
 
@@ -621,7 +626,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '通信タイムアウトを10秒→25秒に延長（同期失敗の多発対策）・デバッグログを削除';
+const APP_VERSION_NOTE = '余裕計算除外：⑥のスイッチに「切り替え中」表示、除外中の品目を⑥上部・①アラートバー・③に表示';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -1030,6 +1035,11 @@ function setPreGroup(groupName, val) {
 function renderAlertBar(groups) {
   const bar = document.getElementById('alert-bar');
   if (!bar) return;
+  // 余裕計算除外中の品目があれば、バーの末尾に品目名を表示する（除外が効いているかの確認用）
+  const exNames = getExcludedGroupNames();
+  const exNote = exNames.length > 0
+    ? `<div style="font-size:11px;font-weight:400;opacity:.85;margin-top:2px">🚫 余裕計算から除外中：${exNames.slice(0, 3).map(esc).join('、')}${exNames.length > 3 ? ` 他${exNames.length - 3}品目` : ''}</div>`
+    : '';
 
   if (!groups.length) {
     bar.className = 'alert-gray';
@@ -1073,7 +1083,7 @@ function renderAlertBar(groups) {
     bar.className = 'alert-gray';
     bar.innerHTML =
       `稼働未登録（⑤シフト・④勤怠で設定）` +
-      `　<span style="opacity:.7">｜ 必要稼働 ${fmtH(needH)}　進捗済 ${fmtH(elapsedH)}　必要残 ${fmtH(remH)}</span>`;
+      `　<span style="opacity:.7">｜ 必要稼働 ${fmtH(needH)}　進捗済 ${fmtH(elapsedH)}　必要残 ${fmtH(remH)}</span>` + exNote;
     return;
   }
 
@@ -1082,12 +1092,12 @@ function renderAlertBar(groups) {
     bar.className = 'alert-ok';
     bar.innerHTML =
       `✅ 余裕 ${fmtH(diff)}` +
-      `　<span style="opacity:.8">｜ 必要稼働 ${fmtH(needH)}　勤怠 ${fmtH(cap.totalHours)}　進捗済 ${fmtH(elapsedH)}　必要残 ${fmtH(remH)}</span>`;
+      `　<span style="opacity:.8">｜ 必要稼働 ${fmtH(needH)}　勤怠 ${fmtH(cap.totalHours)}　進捗済 ${fmtH(elapsedH)}　必要残 ${fmtH(remH)}</span>` + exNote;
   } else {
     bar.className = 'alert-ng';
     bar.innerHTML =
       `⚠️ 不足 ${fmtH(-diff)}` +
-      `　<span style="opacity:.9">｜ 必要稼働 ${fmtH(needH)}　勤怠 ${fmtH(cap.totalHours)}　進捗済 ${fmtH(elapsedH)}　必要残 ${fmtH(remH)}</span>`;
+      `　<span style="opacity:.9">｜ 必要稼働 ${fmtH(needH)}　勤怠 ${fmtH(cap.totalHours)}　進捗済 ${fmtH(elapsedH)}　必要残 ${fmtH(remH)}</span>` + exNote;
   }
 }
 
@@ -2153,6 +2163,12 @@ const _planGroupOpen = {};
 
 let _p3OpenGroup = null;
 
+// 「余裕計算除外」の品目の計画かどうか
+function isExcludedPlan(p) {
+  const item = st.itemMaster.find(it => it.id === p.itemId);
+  return !!(item && item.excludeAlert);
+}
+
 // 「余裕計算除外」の品目の計画で、完了済み（納品後の削除待ち）かどうか
 function isExcludedDonePlan(p) {
   const item = st.itemMaster.find(it => it.id === p.itemId);
@@ -2236,7 +2252,9 @@ function renderPlanList() {
       </div>
       <div style="font-size:30px;font-weight:700;color:var(--t)">${nearestDate ? fmtDateShort(nearestDate) : '－'}</div>
       <div class="p2-tile-progress-label">${isGroupDone ? '✅ 完了' : '納期'}</div>
-      ${hasDelNotice ? '<div style="font-size:12px;font-weight:700;color:#fbbf24;margin-top:6px;line-height:1.4">📌 納品済みなら削除してください</div>' : ''}
+      ${hasDelNotice
+        ? '<div style="font-size:12px;font-weight:700;color:#fbbf24;margin-top:6px;line-height:1.4">📌 納品済みなら削除してください</div>'
+        : (sorted.some(isExcludedPlan) ? '<div style="font-size:12px;font-weight:700;color:#fbbf24;margin-top:6px;line-height:1.4">🚫 余裕計算外</div>' : '')}
     </div>`;
   });
   tilesHtml += '</div>';
@@ -2271,7 +2289,7 @@ function renderP3SheetBody(groupName) {
     const isDone = qty > 0 && postTotal >= qty;
     return `<div style="display:flex;align-items:center;padding:14px 16px;border-bottom:1px solid #0d1520;gap:8px;flex-wrap:wrap">
       <div style="flex:1;min-width:0">
-        <div style="font-size:20px;font-weight:700">${esc(colorName)}${p.priority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}${isDone ? ' <span style="font-size:11px;color:var(--muted)">✓完了</span>' : ''}</div>
+        <div style="font-size:20px;font-weight:700">${esc(colorName)}${p.priority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}${isDone ? ' <span style="font-size:11px;color:var(--muted)">✓完了</span>' : ''}${isExcludedPlan(p) ? ' <span style="font-size:11px;color:#fbbf24">🚫余裕計算外</span>' : ''}</div>
         <div style="font-size:13px;color:var(--muted);margin-top:4px">予定: <span style="font-size:28px;font-weight:700;color:var(--t)">${qty}</span>個　納期: ${fmtDate(p.date)}${p.memo ? '　'+esc(p.memo) : ''}</div>
         ${isExcludedDonePlan(p) ? '<div style="font-size:13px;font-weight:700;color:#fbbf24;margin-top:6px">📌 完了済みです。納品済みなら、右の🗑で削除してください</div>' : ''}
       </div>
@@ -2843,7 +2861,35 @@ function _applyShiftToDay(day) {
 // ============================================================
 // 品目タブ（⑥）
 // ============================================================
+// 余裕計算除外中の品目を、表示名ごとにまとめた一覧で返す（例：['専用品X', '専用品Y']）
+function getExcludedGroupNames() {
+  const names = [];
+  st.itemMaster.forEach(it => {
+    if (!it.excludeAlert) return;
+    const n = dispN(it);
+    if (!names.includes(n)) names.push(n);
+  });
+  return names;
+}
+
+// 切り替え処理の最中の品目ID（処理中は、自動更新で一覧が描き直されても「切り替え中」の表示を保つため）
+let _exToggleBusyId = null;
+
+function renderItemExSummary() {
+  const box = document.getElementById('item-ex-summary');
+  if (!box) return;
+  const names = getExcludedGroupNames();
+  if (names.length === 0) {
+    box.className = '';
+    box.innerHTML = '余裕計算除外中の品目：なし<br><span style="font-size:11px">不定期納品の専用品は、下の一覧のスイッチで「除外」にできます</span>';
+  } else {
+    box.className = 'has';
+    box.innerHTML = `🚫 余裕計算除外中：<strong>${names.length}品目</strong><br>${names.map(esc).join('、')}`;
+  }
+}
+
 function renderItemList() {
+  renderItemExSummary();
   const el = document.getElementById('item-list');
   if (!el) return;
   if (!st.itemMaster.length) {
@@ -2859,12 +2905,17 @@ function renderItemList() {
   el.innerHTML = Object.entries(grouped).map(([g, items]) => `
     <div class="card mb8">
       <div class="card-title">${esc(g)}</div>
-      ${items.map(it => `<div class="item-row">
+      ${items.map(it => {
+        const busy = _exToggleBusyId !== null && it.id === _exToggleBusyId;
+        const cls = busy ? ' pending' : (it.excludeAlert ? ' on' : '');
+        const label = busy ? '⏳ 切り替え中…' : (it.excludeAlert ? '🚫 余裕計算から除外中' : '余裕計算に含む');
+        return `<div class="item-row${it.excludeAlert ? ' ex-on' : ''}">
         <div class="item-name">${esc(it.name)}</div>
         <div class="item-color">${esc(it.color)}</div>
         <div class="item-ph text-muted">前${it.prePh}分 後${it.postPh}分</div>
-        <button class="item-ex-btn${it.excludeAlert ? ' on' : ''}" data-id="${esc(it.id)}" data-name="${esc(it.name)}" data-color="${esc(it.color)}" onclick="toggleExcludeAlert(this)">${it.excludeAlert ? '🚫 余裕計算から除外中' : '余裕計算に含む'}</button>
-      </div>`).join('')}
+        <button class="item-ex-btn${cls}"${busy ? ' disabled' : ''} data-id="${esc(it.id)}" data-name="${esc(it.name)}" data-color="${esc(it.color)}" onclick="toggleExcludeAlert(this)">${label}</button>
+      </div>`;
+      }).join('')}
     </div>`).join('');
 }
 
@@ -2876,7 +2927,11 @@ async function toggleExcludeAlert(btn) {
   if (_itemMasterSaving) { showToast('品目マスターを保存中です。少し待ってから操作してください'); return; }
   const itemId = btn.dataset.id, name = btn.dataset.name, color = btn.dataset.color;
   _itemMasterSaving = true; // 処理中はポーリングによる品目マスターの上書きを止める
+  // 押した瞬間に「切り替え中」を表示する（GASが遅いと完了まで数秒〜数十秒かかるため）
+  _exToggleBusyId = itemId;
   btn.disabled = true;
+  btn.classList.add('pending');
+  btn.textContent = '⏳ 切り替え中…';
   const prevMaster = st.itemMaster;
   try {
     const json = await Cloud.get();
@@ -2908,13 +2963,14 @@ async function toggleExcludeAlert(btn) {
       return;
     }
     showToast(target.excludeAlert
-      ? `🚫 「${name} ${color}」を余裕計算から除外しました`
-      : `「${name} ${color}」を余裕計算に含めるようにしました`);
+      ? `✅ 切り替えました：「${name} ${color}」は余裕計算から【除外】されます`
+      : `✅ 切り替えました：「${name} ${color}」は余裕計算に【含む】ようになりました`);
   } catch (e) {
     st.itemMaster = prevMaster;
     showToast('❌ 切り替えに失敗しました。もう一度お試しください');
   } finally {
     _itemMasterSaving = false;
+    _exToggleBusyId = null;
     renderAll();
   }
 }
