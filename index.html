@@ -108,6 +108,8 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .item-name{flex:2;font-weight:600}
 .item-color{flex:1;color:var(--muted)}
 .item-ph{color:var(--t);min-width:70px;text-align:right}
+.item-ex-btn{flex-shrink:0;padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.item-ex-btn.on{border-color:#d97706;background:#2a1a05;color:#fbbf24}
 /* 設定タブ */
 .setting-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .setting-label{font-size:13px;color:var(--muted);min-width:80px}
@@ -152,6 +154,7 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .p2-tile{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 14px;cursor:pointer;transition:border-color .2s,background .2s;-webkit-tap-highlight-color:transparent;user-select:none}
 .p2-tile:active{background:#1a2535}
 .p2-tile.done{opacity:0.45;filter:grayscale(0.5)}
+.p2-tile.done.del-notice{opacity:0.9;filter:none;border-color:#d97706}
 .p2-tile.priority{border-color:var(--y)}
 .p2-tile-name{font-size:22px;font-weight:700;color:var(--text);line-height:1.2;margin-bottom:8px}
 .p2-tile-qty{font-size:28px;font-weight:700;color:var(--muted)}
@@ -442,7 +445,7 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 <div id="panel-items" class="panel">
   <div class="card mb12">
     <div class="card-title mb8">CSVインポート</div>
-    <div class="f12 text-muted mb8">列順: 品目名, カラー, 前工程時間(分/個), 後工程時間(分/個), シート品番, カット幅, カット長, グループ, 単価, 表示名, 表示カラー<br>※表示名・表示カラーは省略可（空欄時は品目名・カラーをそのまま使用）<br>※Excel（.xlsx）・CSV（.csv）どちらも対応。Excelは1シート目を読み込みます。</div>
+    <div class="f12 text-muted mb8">列順: 品目名, カラー, 前工程時間(分/個), 後工程時間(分/個), シート品番, カット幅, カット長, グループ, 単価, 表示名, 表示カラー, 箱入数<br>※表示名・表示カラーは省略可（空欄時は品目名・カラーをそのまま使用）<br>※「余裕計算除外」の設定は下の一覧のスイッチで切り替えます。再インポート時は品目名＋カラーが同じ品目のみ設定が引き継がれます<br>※Excel（.xlsx）・CSV（.csv）どちらも対応。Excelは1シート目を読み込みます。</div>
     <input type="file" id="csv-file" accept=".csv,.xlsx" onchange="importCsv(this)" style="font-size:13px;color:var(--text)">
   </div>
   <div id="item-list"></div>
@@ -618,7 +621,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '②個人タブ：日付ごとの入力履歴を編集・削除できる機能を追加';
+const APP_VERSION_NOTE = '③計画：余裕計算除外品目の完了済み計画に「納品済みなら削除」の案内を表示';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -1035,12 +1038,14 @@ function renderAlertBar(groups) {
   }
 
   // サイクル全体の必要工数（後工程ベース）
+  // ※品目マスターで「余裕計算除外」が設定された品目（不定期納品の専用品など）は集計に含めない
   let totalNeedMin = 0;
   groups.forEach(g => {
     g.plans.forEach(p => {
       if (toNum(p.qty) === 0) return;
       const item = st.itemMaster.find(it => it.id === p.itemId);
       if (!item) return;
+      if (item.excludeAlert) return;
       totalNeedMin += toNum(p.qty) * toNum(item.postPh);
     });
   });
@@ -1052,6 +1057,7 @@ function renderAlertBar(groups) {
       if (toNum(p.qty) === 0) return;
       const item = st.itemMaster.find(it => it.id === p.itemId);
       if (!item) return;
+      if (item.excludeAlert) return;
       const prog = st.progress[p.id];
       const postTotal = prog ? calcPostTotal(prog.postDone) : 0;
       totalRemMin += Math.max(0, toNum(p.qty) - postTotal) * toNum(item.postPh);
@@ -1961,6 +1967,19 @@ function importPlanCsv(input) {
     } else {
       csvText = e.target.result;
     }
+    // 除外品目の行に数量が入っていたら、バックアップ（復元点の更新）より前に確認する
+    // （キャンセルしても「↩️ 直前に戻す」の復元点とデータに影響しないようにするため）
+    const excludedRows = _findExcludedQtyRows(csvText);
+    if (excludedRows.length > 0) {
+      const list = excludedRows.map(r => `・${r.name} ${r.color}：${r.qty}個`).join('\n');
+      const msg = '【余裕計算除外】の品目の行に数量が入っています。\n\n' + list +
+        '\n\nこのままインポートすると、残してある既存の計画に加えて、この数量の計画も新しく登録されます（重複します）。\nインポートを続けますか？';
+      if (!confirm(msg)) {
+        input.value = '';
+        showToast('インポートを中止しました（データは変更されていません）');
+        return;
+      }
+    }
     _backupPlansProgress();
     _applyPlanCsv(csvText);
     input.value = '';
@@ -2000,13 +2019,41 @@ function undoPlansImport() {
   showToast('↩️ インポート前の状態に戻しました');
 }
 
-// 計画CSVインポート（完全置換：CSVの内容で計画・進捗を総入れ替え）
+// 計画CSVの中で、「余裕計算除外」の品目なのに数量が1以上の行を返す（インポート前の確認用）
+function _findExcludedQtyRows(csvText) {
+  const found = [];
+  const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
+  lines.forEach((line, idx) => {
+    if (idx === 0 && /品目名|name|item/i.test(line)) return;
+    const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    const [rawName, rawColor, rawQty] = cols;
+    if (!rawName || !rawColor) return;
+    const item = st.itemMaster.find(it =>
+      it.name.trim() === rawName.trim() && it.color.trim() === rawColor.trim()
+    );
+    if (!item || !item.excludeAlert) return;
+    const qty = toNum(rawQty);
+    if (qty > 0) found.push({ name: rawName.trim(), color: rawColor.trim(), qty });
+  });
+  return found;
+}
+
+// 計画CSVインポート（CSVの内容で計画・進捗を総入れ替え。ただし「余裕計算除外」品目の既存計画・進捗は残す）
 function _applyPlanCsv(csvText) {
   const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
   const resultEl = document.getElementById('plan-csv-result');
   let added = 0, skipped = [], rowNum = 0;
   const newPlans = [];
   const newProgress = {};
+
+  // 「余裕計算除外」の品目（不定期納品の専用品など）の既存の計画・進捗は、入れ替えずに残す
+  const keptPlans = (st.plans || []).filter(pl => {
+    const it = st.itemMaster.find(i => i.id === pl.itemId);
+    return !!(it && it.excludeAlert);
+  });
+  keptPlans.forEach(pl => {
+    newProgress[pl.id] = st.progress[pl.id] || { preDone: 0, postDone: {} };
+  });
 
   lines.forEach((line, idx) => {
     // ヘッダー行を自動スキップ
@@ -2051,27 +2098,32 @@ function _applyPlanCsv(csvText) {
     added++;
   });
 
-  // 完全置換：旧計画・旧進捗をすべて新データで入れ替え
-  st.plans    = newPlans;
+  // 完全置換：旧計画・旧進捗を新データで入れ替え（除外品目の既存計画は残す）
+  st.plans    = newPlans.concat(keptPlans);
   st.progress = newProgress;
 
-  _showCsvResult(resultEl, added, skipped);
+  _showCsvResult(resultEl, added, skipped, keptPlans.length);
   saveLocal();
   Cloud.savePlansProgress(null, null);
   renderAll();
-  showToast(`📂 計画を${added}件で総入れ替えしました（旧データは削除されました）`);
+  showToast(keptPlans.length > 0
+    ? `📂 計画を${added}件で入れ替えました（余裕計算除外の既存計画${keptPlans.length}件は残しました）`
+    : `📂 計画を${added}件で総入れ替えしました（旧データは削除されました）`);
 }
 
-function _showCsvResult(resultEl, added, skipped) {
+function _showCsvResult(resultEl, added, skipped, keptCount) {
   let html = '';
   if (added > 0) {
     html += `<div style="color:var(--g);font-weight:700">✅ ${added}件の計画で総入れ替えしました</div>`;
+  }
+  if (keptCount > 0) {
+    html += `<div style="color:var(--b);margin-top:6px;font-weight:700">📌 余裕計算除外の既存計画 ${keptCount}件を残しました</div>`;
   }
   if (skipped.length > 0) {
     html += `<div style="color:var(--y);margin-top:8px;font-weight:700">⚠️ スキップ ${skipped.length}件</div>`;
     html += skipped.map(s => `<div style="color:var(--muted);padding-left:8px">・${esc(s)}</div>`).join('');
   }
-  if (added === 0 && skipped.length === 0) {
+  if (added === 0 && skipped.length === 0 && !keptCount) {
     html = '<div style="color:var(--muted)">有効なデータがありませんでした</div>';
   }
   resultEl.innerHTML = html;
@@ -2100,6 +2152,15 @@ function downloadPlanCsvTemplate() {
 const _planGroupOpen = {};
 
 let _p3OpenGroup = null;
+
+// 「余裕計算除外」の品目の計画で、完了済み（納品後の削除待ち）かどうか
+function isExcludedDonePlan(p) {
+  const item = st.itemMaster.find(it => it.id === p.itemId);
+  if (!item || !item.excludeAlert) return false;
+  const qty = toNum(p.qty);
+  const prog = st.progress[p.id] || {};
+  return qty > 0 && calcPostTotal(prog.postDone) >= qty;
+}
 
 function renderPlanList() {
   const el = document.getElementById('plan-list');
@@ -2161,7 +2222,9 @@ function renderPlanList() {
     const totalQty = sorted.reduce((s,p) => s + toNum(p.qty), 0);
     // 最も近い納期
     const nearestDate = sorted.map(p => p.date).filter(Boolean).sort()[0];
-    const tileCls = ['p2-tile', isGroupDone ? 'done' : '', hasPriority ? 'priority' : ''].filter(Boolean).join(' ');
+    // 余裕計算除外の品目で完了済みの計画がある場合は、削除を促す案内を出す
+    const hasDelNotice = sorted.some(isExcludedDonePlan);
+    const tileCls = ['p2-tile', isGroupDone ? 'done' : '', hasDelNotice ? 'del-notice' : '', hasPriority ? 'priority' : ''].filter(Boolean).join(' ');
 
     tilesHtml += `<div class="${tileCls}" onclick="openP3Sheet('${esc(groupName)}')">
       <div class="p2-tile-bottom" style="margin-bottom:10px">
@@ -2173,6 +2236,7 @@ function renderPlanList() {
       </div>
       <div style="font-size:30px;font-weight:700;color:var(--t)">${nearestDate ? fmtDateShort(nearestDate) : '－'}</div>
       <div class="p2-tile-progress-label">${isGroupDone ? '✅ 完了' : '納期'}</div>
+      ${hasDelNotice ? '<div style="font-size:12px;font-weight:700;color:#fbbf24;margin-top:6px;line-height:1.4">📌 納品済みなら削除してください</div>' : ''}
     </div>`;
   });
   tilesHtml += '</div>';
@@ -2209,6 +2273,7 @@ function renderP3SheetBody(groupName) {
       <div style="flex:1;min-width:0">
         <div style="font-size:20px;font-weight:700">${esc(colorName)}${p.priority ? ' <span style="font-size:11px;color:#fb923c">●優先</span>' : ''}${isDone ? ' <span style="font-size:11px;color:var(--muted)">✓完了</span>' : ''}</div>
         <div style="font-size:13px;color:var(--muted);margin-top:4px">予定: <span style="font-size:28px;font-weight:700;color:var(--t)">${qty}</span>個　納期: ${fmtDate(p.date)}${p.memo ? '　'+esc(p.memo) : ''}</div>
+        ${isExcludedDonePlan(p) ? '<div style="font-size:13px;font-weight:700;color:#fbbf24;margin-top:6px">📌 完了済みです。納品済みなら、右の🗑で削除してください</div>' : ''}
       </div>
       <button class="btn-sm" onclick="togglePriority('${p.id}')">${p.priority ? '⭐':'☆'}</button>
       <button class="btn-sm" onclick="closeP3Sheet();openEditPlan('${p.id}')" title="編集">✏️</button>
@@ -2798,8 +2863,60 @@ function renderItemList() {
         <div class="item-name">${esc(it.name)}</div>
         <div class="item-color">${esc(it.color)}</div>
         <div class="item-ph text-muted">前${it.prePh}分 後${it.postPh}分</div>
+        <button class="item-ex-btn${it.excludeAlert ? ' on' : ''}" data-id="${esc(it.id)}" data-name="${esc(it.name)}" data-color="${esc(it.color)}" onclick="toggleExcludeAlert(this)">${it.excludeAlert ? '🚫 余裕計算から除外中' : '余裕計算に含む'}</button>
       </div>`).join('')}
     </div>`).join('');
+}
+
+// ⑥品目タブ：品目ごとの「余裕計算除外」を切り替える
+// 品目マスターは全件まとめて上書き保存される仕組みのため、切り替えの直前にクラウドの最新を取得して
+// その上に反映する（別端末・事務アプリが先に更新した内容を古い内容で上書きしないため）
+async function toggleExcludeAlert(btn) {
+  if (!gasUrl) { alert('GAS URLが未設定です。⚙️設定タブで設定してください。'); return; }
+  if (_itemMasterSaving) { showToast('品目マスターを保存中です。少し待ってから操作してください'); return; }
+  const itemId = btn.dataset.id, name = btn.dataset.name, color = btn.dataset.color;
+  _itemMasterSaving = true; // 処理中はポーリングによる品目マスターの上書きを止める
+  btn.disabled = true;
+  const prevMaster = st.itemMaster;
+  try {
+    const json = await Cloud.get();
+    if (!json || !json.ok || !Array.isArray(json.itemMaster) || json.itemMaster.length === 0) {
+      showToast('❌ 最新の品目マスターを取得できませんでした。通信状態を確認して、もう一度お試しください');
+      return;
+    }
+    const latest = json.itemMaster.map(mapCloudItem);
+    // IDと品目名＋カラーの両方で照合。IDが一致しない場合は品目名＋カラーで探し、複数あれば中止する
+    let target = latest.find(it => it.id === itemId && it.name === name && it.color === color);
+    if (!target) {
+      const sameName = latest.filter(it => it.name === name && it.color === color);
+      if (sameName.length === 1) target = sameName[0];
+      else {
+        showToast(sameName.length === 0
+          ? '❌ 対象の品目が最新の品目マスターに見つかりません。画面を更新してください'
+          : '❌ 同じ品目名・カラーが複数あるため切り替えできません。品目マスターを確認してください');
+        return;
+      }
+    }
+    target.excludeAlert = !target.excludeAlert;
+    st.itemMaster = latest;
+    saveLocal();
+    const ok = await new Promise(res => Cloud.saveItemMaster(() => res(true), () => res(false)));
+    if (!ok) {
+      st.itemMaster = prevMaster;
+      saveLocal();
+      showToast('❌ 保存に失敗しました。切り替えは反映されていません。もう一度お試しください');
+      return;
+    }
+    showToast(target.excludeAlert
+      ? `🚫 「${name} ${color}」を余裕計算から除外しました`
+      : `「${name} ${color}」を余裕計算に含めるようにしました`);
+  } catch (e) {
+    st.itemMaster = prevMaster;
+    showToast('❌ 切り替えに失敗しました。もう一度お試しください');
+  } finally {
+    _itemMasterSaving = false;
+    renderAll();
+  }
 }
 
 function importCsv(input) {
@@ -2832,10 +2949,16 @@ function importCsv(input) {
         .map(l => l.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
     }
     const items = [];
+    // 余裕計算除外フラグ：CSVには列を持たせず、旧品目マスターの設定を品目名＋カラーで引き継ぐ
+    const prevExcludeMap = {};
+    (st.itemMaster || []).forEach(it => {
+      if (it.excludeAlert) prevExcludeMap[it.name + '_' + it.color] = true;
+    });
     rows.forEach((cols, idx) => {
       // ヘッダー行をスキップ
       if (idx === 0 && /品目名|name/i.test(String(cols[0]))) return;
       if (!cols[0]) return;
+      const excludeAlert = !!prevExcludeMap[String(cols[0] || '') + '_' + String(cols[1] || '')];
       items.push({
         id: genId('it'),
         name:     String(cols[0]  || ''),
@@ -2849,7 +2972,8 @@ function importCsv(input) {
         price:    parseFloat(cols[8]) || 0,
         dispName:  String(cols[9]  || ''),
         dispColor: String(cols[10] || ''),
-        caseQty:   parseFloat(cols[11]) || 0
+        caseQty:   parseFloat(cols[11]) || 0,
+        excludeAlert: excludeAlert
       });
     });
     // 旧品目マスターのIDと新IDの対応を作り、stockデータのキーを付け替える
@@ -3037,19 +3161,25 @@ const Cloud = {
 
 let _itemMasterSaving = false; // 品目マスター保存中フラグ
 
+// クラウドの品目マスター1件をアプリ内の形式に変換（applyCloudDataと⑥品目タブの切り替えで共用）
+function mapCloudItem(it) {
+  return {
+    id: String(it.id||''), name: String(it.name||''), color: String(it.color||''),
+    prePh: toNum(it.prePh), postPh: toNum(it.postPh),
+    sheetNo: String(it.sheetNo||''), cutW: String(it.cutW||''),
+    cutL: String(it.cutL||''), group: String(it.group||'その他'),
+    price: parseFloat(it.price) || 0,
+    dispName:  String(it.dispName  || ''),
+    dispColor: String(it.dispColor || ''),
+    caseQty:   parseFloat(it.caseQty) || 0,
+    excludeAlert: !!it.excludeAlert
+  };
+}
+
 function applyCloudData(json, forceShiftAttend) {
   // 品目マスター保存中はポーリングによる上書きをスキップ
   if (!_itemMasterSaving && Array.isArray(json.itemMaster) && json.itemMaster.length > 0) {
-    st.itemMaster = json.itemMaster.map(it => ({
-      id: String(it.id||''), name: String(it.name||''), color: String(it.color||''),
-      prePh: toNum(it.prePh), postPh: toNum(it.postPh),
-      sheetNo: String(it.sheetNo||''), cutW: String(it.cutW||''),
-      cutL: String(it.cutL||''), group: String(it.group||'その他'),
-      price: parseFloat(it.price) || 0,
-      dispName:  String(it.dispName  || ''),
-      dispColor: String(it.dispColor || ''),
-      caseQty:   parseFloat(it.caseQty) || 0
-    }));
+    st.itemMaster = json.itemMaster.map(mapCloudItem);
   }
   if (Array.isArray(json.plans)) {
     // クラウドのplansを常に反映（空配列＝リセットも含む）
