@@ -3,7 +3,9 @@
 // ============================================================
 //
 // ▼変更履歴管理（GAS_CHANGELOG.md）
-// 内部バージョン: v4  (2026-10-05)
+// 内部バージョン: v5  (2026-10-05)
+// v5: getEverything_ も同様に、操作ログ（operationLog）を読まず空配列を返すように変更
+//     （進捗アプリが getEverything を呼んでいないこと、どちらのアプリも操作ログを使っていないことを確認済み）
 // v4: getAll_ が操作ログ（operationLog）の全件を返していたのをやめ、空配列を返すように変更
 //     （進捗アプリでGAS応答が10秒前後かかり同期失敗が多発した対策。どちらのアプリも使っていないデータのため）
 // v3: saveShipping_にid重複防止を追加（チェックリスト・納品書履歴が応答配達失敗の自動リトライで
@@ -144,7 +146,8 @@ function getEverything_() {
   const plans        = readPlansSheet_(ss);
   const progress     = readProgressSheet_(ss);
   const shiftAttend  = readShiftAttend_(ss);
-  const operationLog = readJsonSheet_(ss, 'operationLog');
+  // v5: 操作ログは全件読み込むと重いため読まない（どちらのアプリも使っていない。getAll_と同じ理由）
+  const operationLog = [];
   const stock        = readStockSheet_(ss);
 
   // ---- getShipping_相当 ----
@@ -202,7 +205,7 @@ function getAll_() {
     //     どちらのアプリも getAll で受け取った操作ログを使っていないため、シートを読まずに空配列を返す。
     //     キー自体は、受け取り側が data.operationLog を参照しても壊れないよう互換のために残している。
     //     ※ 操作ログの保存（saveOperationLog_）・アーカイブ（archiveOperationLog_）には影響しない。
-    //     ※ getEverything_ 側は今回は変更していない（呼び出し元の確認待ち）。
+    //     ※ getEverything_ も v5 で同様に空配列を返すよう変更済み。
     operationLog: [],
     stock:        readStockSheet_(ss)
   });
