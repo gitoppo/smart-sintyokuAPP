@@ -3,7 +3,9 @@
 // ============================================================
 //
 // ▼変更履歴管理（GAS_CHANGELOG.md）
-// 内部バージョン: v3  (2026-09-24)
+// 内部バージョン: v4  (2026-10-05)
+// v4: getAll_ が操作ログ（operationLog）の全件を返していたのをやめ、空配列を返すように変更
+//     （進捗アプリでGAS応答が10秒前後かかり同期失敗が多発した対策。どちらのアプリも使っていないデータのため）
 // v3: saveShipping_にid重複防止を追加（チェックリスト・納品書履歴が応答配達失敗の自動リトライで
 //     2〜3件重複登録される不具合の修正。saveMaterialMovement_と同じ対策パターン）
 //
@@ -196,7 +198,12 @@ function getAll_() {
     plans:        readPlansSheet_(ss),
     progress:     readProgressSheet_(ss),
     shiftAttend:  readShiftAttend_(ss),
-    operationLog: readJsonSheet_(ss, 'operationLog'),
+    // v4: 操作ログは全件読み込むと応答が重くなる（進捗アプリで同期失敗が多発した原因）。
+    //     どちらのアプリも getAll で受け取った操作ログを使っていないため、シートを読まずに空配列を返す。
+    //     キー自体は、受け取り側が data.operationLog を参照しても壊れないよう互換のために残している。
+    //     ※ 操作ログの保存（saveOperationLog_）・アーカイブ（archiveOperationLog_）には影響しない。
+    //     ※ getEverything_ 側は今回は変更していない（呼び出し元の確認待ち）。
+    operationLog: [],
     stock:        readStockSheet_(ss)
   });
 }
