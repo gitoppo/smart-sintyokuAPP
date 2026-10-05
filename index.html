@@ -626,7 +626,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '通信タイムアウトを25秒→10秒に戻す（10/5の進捗の欠落への対処）';
+const APP_VERSION_NOTE = '進捗は自分の分だけ送信・保存失敗時は自動再送・取得は最大3回やり直し・全データ送信/除外解除に確認画面';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -1331,8 +1331,9 @@ function saveP2HistoryEdit(planId, date) {
   const prevVal = toNum(st.progress[planId].postDone[key]);
   st.progress[planId].postDone[key] = newVal;
   saveLocal();
+  _dirtySeq++;
   markUnsaved();
-  Cloud.savePlansProgress(() => markSaved(), () => updateSyncBar('error'));
+  flushProgressSave(1, { [planId]: [key] });   // 修正した1件（そのキー）だけを送る
   // 操作ログに記録
   const plan = st.plans.find(p => p.id === planId);
   const item = plan ? st.itemMaster.find(it => it.id === plan.itemId) : null;
@@ -1354,11 +1355,14 @@ function deleteP2HistoryEntry(planId, date) {
   let prevVal = 0;
   if (st.progress[planId] && st.progress[planId].postDone) {
     prevVal = toNum(st.progress[planId].postDone[key]);
-    delete st.progress[planId].postDone[key];
+    // GASはキーを「消す」ことができない（送られた値で上書きするだけ）ため、削除は「0に書き換える」形にする。
+    // （以前はキーを消して送っていたため、クラウドに残り、次の自動更新で元に戻っていた）
+    st.progress[planId].postDone[key] = 0;
   }
   saveLocal();
+  _dirtySeq++;
   markUnsaved();
-  Cloud.savePlansProgress(() => markSaved(), () => updateSyncBar('error'));
+  flushProgressSave(1, { [planId]: [key] });
   const plan = st.plans.find(p => p.id === planId);
   const item = plan ? st.itemMaster.find(it => it.id === plan.itemId) : null;
   if (item) {
@@ -2926,6 +2930,9 @@ async function toggleExcludeAlert(btn) {
   if (!gasUrl) { alert('GAS URLが未設定です。⚙️設定タブで設定してください。'); return; }
   if (_itemMasterSaving) { showToast('品目マスターを保存中です。少し待ってから操作してください'); return; }
   const itemId = btn.dataset.id, name = btn.dataset.name, color = btn.dataset.color;
+  // 除外を「解除」するときだけ確認する（1回のタップで、除外の設定が消えるのを防ぐ）
+  if (btn.classList && btn.classList.contains('on') &&
+      !confirm(`「${name} ${color}」の余裕計算の除外を解除します。\n解除すると、①のアラートバーの余裕時間の計算に含まれるようになります。\n\nよろしいですか？`)) return;
   _itemMasterSaving = true; // 処理中はポーリングによる品目マスターの上書きを止める
   // 押した瞬間に「切り替え中」を表示する（GASが遅いと完了まで数秒〜数十秒かかるため）
   _exToggleBusyId = itemId;
@@ -3104,6 +3111,7 @@ function pingGas() {
 }
 
 function pushToCloud() {
+  if (!confirm('【全データ送信】\nこの端末の内容（品目マスター・計画・進捗など）で、クラウドを上書きします。\n\n他の端末が入力した最新の内容を、この端末の古い内容で上書きしてしまう恐れがあります。通常は使いません。\n\n本当に実行しますか？')) return;
   Cloud.saveAll(() => showSyncStatus('✅ 送信完了', true), () => showSyncStatus('❌ 送信失敗', false));
 }
 
@@ -3142,22 +3150,30 @@ function saveLocal() {
 // GASへの通信のタイムアウト（ミリ秒）。
 // 10/5の13:54に25秒へ延長したところ、14時以降に3台の進捗の保存が欠落したため、10秒に戻した。
 // （9月は10秒で運用し欠落は約0.7%だった。因果関係は未確定だが、安全側に戻している）
-const GAS_TIMEOUT_MS = 10000;
+const GAS_TIMEOUT_MS = 10000;          // 保存（POST）の1回あたりの待ち時間
+// 取得（GET）：GASは約2秒で終わるのに、応答が端末に届かない回がある（10/5の実行ログで確認）。
+// 待っても届かないので、1回の待ちを短くして、最大3回まで新しく取得し直す。
+const GAS_GET_TIMEOUT_MS = 7000;
+const GAS_GET_ATTEMPTS = 3;
 
 const Cloud = {
   async get() {
     if (!gasUrl) return null;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS); // タイムアウト
-    try {
-      const r = await fetch(`${gasUrl}?action=getAll&v=${Date.now()}`, {
-        method:'GET', redirect:'follow', cache:'no-store', signal: controller.signal
-      });
-      return await r.json();
-    } catch(e) {
-      if (e.name === 'AbortError') console.warn(`Cloud.get: タイムアウト（${GAS_TIMEOUT_MS / 1000}秒）`);
-      return null;
-    } finally { clearTimeout(timer); }
+    // 1回ごとに新しいリクエストを出す。成功したらすぐ返し、全て失敗したときだけnullを返す
+    for (let i = 1; i <= GAS_GET_ATTEMPTS; i++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), GAS_GET_TIMEOUT_MS);
+      try {
+        const r = await fetch(`${gasUrl}?action=getAll&v=${Date.now()}`, {
+          method:'GET', redirect:'follow', cache:'no-store', signal: controller.signal
+        });
+        return await r.json();
+      } catch(e) {
+        if (e.name === 'AbortError') console.warn(`Cloud.get: タイムアウト（${GAS_GET_TIMEOUT_MS / 1000}秒）${i}/${GAS_GET_ATTEMPTS}回目`);
+        else console.warn(`Cloud.get: 失敗 ${i}/${GAS_GET_ATTEMPTS}回目`, e && e.message);
+      } finally { clearTimeout(timer); }
+    }
+    return null;
   },
   async post(payload, cb, errCb, _retried) {
     if (!gasUrl) { if (errCb) errCb('No GAS URL'); return; }
@@ -3491,7 +3507,13 @@ function updateSyncBar(status) {
   }
   // ok
   _lastSyncTime = new Date();
-  _unsavedChanges = false;
+  // ※取得に成功しても、未送信の入力が残っていれば「✅」にせず、未送信の表示を保つ
+  //   （以前は、取得の成功で未送信の印が消え、送れていない入力に気づけなかった）
+  if (_unsavedChanges) {
+    timeEl.textContent = '⚠️ 未送信のデータあり（送信中...）';
+    timeEl.className = 'syncing';
+    return;
+  }
   timeEl.textContent = `✅ 最終同期: ${fmtSyncTime(_lastSyncTime)}`;
   timeEl.className = 'ok';
 }
@@ -3574,56 +3596,95 @@ window.addEventListener('beforeunload', e => {
 
 // タブが非アクティブになる瞬間にも未送信チェック
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && _unsavedChanges) {
-    // タブが隠れる際に即時保存を試みる（sendBeaconは使わずfetchで試行）
-    console.warn('visibilitychange: 未送信データあり・バックグラウンド移行');
-    // debouncedCloudSaveのタイマーを即時実行
-    clearTimeout(_cloudSaveTimer);
-    if (gasUrl && st.deviceName) {
-      const dn = st.deviceName;
-      const today = todayStr();
-      const payload = { action:'savePlansProgress', plans: st.plans, progress: st.progress };
-      // keepaliveオプションでバックグラウンドでも送信を試みる
-      fetch(`${gasUrl}?v=${Date.now()}`, {
-        method:'POST', redirect:'follow', cache:'no-store', keepalive: true,
-        headers:{ 'Content-Type':'text/plain;charset=UTF-8' },
-        body: JSON.stringify(payload)
-      }).catch(() => {});
+  if (document.visibilityState === 'hidden') {
+    // 画面が隠れる瞬間：未送信があれば、「自分の分だけ」を、すぐ送る（待機中の保存は取り消さない）。
+    // ※以前は、取得も合流もせずに全体を送っていたため、他の端末の値を古い値で戻す恐れがあった。
+    if (_unsavedChanges && gasUrl && st.deviceName) {
+      try {
+        fetch(`${gasUrl}?v=${Date.now()}`, {
+          method:'POST', redirect:'follow', cache:'no-store', keepalive: true,
+          headers:{ 'Content-Type':'text/plain;charset=UTF-8' },
+          body: JSON.stringify({ action:'savePlansProgress', plans: st.plans, progress: buildOwnProgress() })
+        }).catch(() => {});
+      } catch(e) {}
     }
+  } else if (document.visibilityState === 'visible') {
+    // 画面が戻ったとき：未送信が残っていれば再送し、最新のデータを取り込む
+    if (_unsavedChanges && !_saveInFlight) flushProgressSave(1);
+    if (typeof pollOnce === 'function') pollOnce();
   }
 });
 
+// ------------------------------------------------------------------
+// 入力の保存（自分の分だけを送る方式）
+// 以前は、全計画の進捗（他の端末の値・昨日以前の値・全計画への「0」）を毎回まとめて送っていたため、
+// 古い情報を持つ端末が、他の端末の入力を巻き戻す事故が起きた（10/5）。
+// ここでは「自分の今日のキー（端末名_日付）」だけを送る。GASは端末名キー単位で合流するので、
+// 他の端末の値には触れない。送る前の取得（合流）も不要になり、同期が不安定でも保存できる。
+// ------------------------------------------------------------------
+let _dirtySeq = 0;            // 入力があるたびに増える番号（送信中に新しい入力があったかの判定用）
+let _saveInFlight = false;    // 保存の送信中か
+let _followUps = 0;           // 送信中の新しい入力による連続の再送の回数（無限に続かないための上限用）
+const SAVE_RETRY_DELAYS = [3000, 8000]; // 失敗したときのやり直し（3秒後・8秒後）
+
+// 送信する進捗を作る。extraKeys: { planId: [キー, ...] } を渡すと、そのキーも含める（履歴の編集用）
+function buildOwnProgress(extraKeys) {
+  const dn = st.deviceName;
+  const dayKey = dn ? dn + '_' + todayStr() : null;
+  const progress = {};
+  Object.entries(st.progress || {}).forEach(([planId, v]) => {
+    const pd = (v && v.postDone) || {};
+    const keys = [];
+    if (dayKey && dayKey in pd) keys.push(dayKey);
+    ((extraKeys && extraKeys[planId]) || []).forEach(k => { if (k in pd && !keys.includes(k)) keys.push(k); });
+    if (!keys.length) return;
+    const post = {};
+    keys.forEach(k => { post[k] = toNum(pd[k]); });
+    // 前工程の値は、GASが「送られなければ0に書き換える」仕様のため、手元の値をそのまま付ける
+    progress[planId] = { preDone: toNum(v.preDone), postDone: post };
+  });
+  return progress;
+}
+
+async function flushProgressSave(attempt, extraKeys) {
+  attempt = attempt || 1;
+  if (!gasUrl || !st.deviceName) return;
+  if (attempt === 1 && _saveInFlight) return;      // 送信中は重ねない（終わった後に、新しい入力があれば再送される）
+  _saveInFlight = true;
+  const seq = _dirtySeq;
+  const progress = buildOwnProgress(extraKeys);
+  const payload = { action:'savePlansProgress', plans: st.plans, progress };
+  await new Promise(resolve => {
+    Cloud.post(payload,
+      () => {
+        _saveInFlight = false;
+        if (seq === _dirtySeq) { _followUps = 0; markSaved(); }   // 送信中に新しい入力が無かった場合だけ「保存済み」にする
+        else {
+          // 送信中に新しい入力があった：その入力を、少し間をあけて、もう一度送る（取りこぼさない）。
+          // 連鎖が止まらなくなるのを防ぐため、間をあけ、連続の回数に上限を設ける。
+          _followUps++;
+          if (_followUps <= 20) setTimeout(() => { flushProgressSave(1, extraKeys); }, 500);
+        }
+        resolve();
+      },
+      () => {
+        if (attempt <= SAVE_RETRY_DELAYS.length) {
+          setTimeout(() => { _saveInFlight = false; flushProgressSave(attempt + 1, extraKeys); }, SAVE_RETRY_DELAYS[attempt - 1]);
+          _saveInFlight = true;                     // やり直しの待ちの間も「送信中」とみなす
+        } else {
+          _saveInFlight = false;
+          updateSyncBar('error');                   // 全て失敗：未送信の印は残す（次の自動更新・画面復帰で再送する）
+        }
+        resolve();
+      });
+  });
+}
+
 async function debouncedCloudSave() {
+  _dirtySeq++;
   markUnsaved();
   clearTimeout(_cloudSaveTimer);
-  _cloudSaveTimer = setTimeout(async () => {
-    const dn = st.deviceName;
-    const today = todayStr();
-    // 送信前にクラウドの最新progressを取得してマージ
-    // （他端末が入力した値を上書きしないようにする）
-    try {
-      const json = await Cloud.get();
-      if (json && json.ok && json.progress && typeof json.progress === 'object') {
-        Object.entries(json.progress).forEach(([k, v]) => {
-          if (!st.progress[k]) st.progress[k] = { preDone:0, postDone:{} };
-          const cloudPostDone = v.postDone || {};
-          // postDone: 自端末の今日分は常にローカル優先（増減どちらの修正も保護）
-          const dayKey = dn ? dn + '_' + today : null;
-          const localVal = dayKey ? toNum((st.progress[k].postDone||{})[dayKey]) : 0;
-          st.progress[k].postDone = Object.assign({}, cloudPostDone);
-          if (dayKey) st.progress[k].postDone[dayKey] = localVal;
-          // preDone: ローカルを優先（前工程は1端末で管理・クラウドより大きければ保持）
-          const localPre = toNum(st.progress[k].preDone);
-          const cloudPre = toNum(v.preDone);
-          st.progress[k].preDone = localPre >= cloudPre ? localPre : cloudPre;
-        });
-      }
-    } catch(e) { /* ネットワークエラー時はそのまま送信 */ }
-    Cloud.savePlansProgress(
-      () => markSaved(),
-      () => updateSyncBar('error')
-    );
-  }, 2000);
+  _cloudSaveTimer = setTimeout(() => { flushProgressSave(1); }, 2000);
 }
 
 function isMemberInputFocused() {
@@ -3638,17 +3699,21 @@ function isMemberInputFocused() {
          a.classList.contains('shift-time-input');
 }
 
-function startPoll() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    if (!gasUrl || isMemberInputFocused()) return;
+let _pollBusy = false;
+// 自動更新の1回分。30秒ごと、および画面が戻ったときに呼ぶ
+async function pollOnce() {
+  if (!gasUrl || isMemberInputFocused()) return;
+  if (_pollBusy) return;                                    // 前回の取得が終わっていなければ重ねない
+  if (document.visibilityState === 'hidden') return;        // 画面が隠れている間は取得しない（GASへの無駄な負荷を避ける）
 
-    // ④勤怠・⑤シフトタブが開いている間は入力保護のため画面更新をスキップ
-    // （データ取得・保存は行うが、シフト・勤怠の画面には反映しない）
-    const attendActive = document.getElementById('panel-attend').classList.contains('active');
-    const shiftActive  = document.getElementById('panel-shift').classList.contains('active');
-    if (attendActive || shiftActive) return;
+  // ④勤怠・⑤シフトタブが開いている間は入力保護のため画面更新をスキップ
+  // （データ取得・保存は行うが、シフト・勤怠の画面には反映しない）
+  const attendActive = document.getElementById('panel-attend').classList.contains('active');
+  const shiftActive  = document.getElementById('panel-shift').classList.contains('active');
+  if (attendActive || shiftActive) return;
 
+  _pollBusy = true;
+  try {
     const json = await Cloud.get();
     if (!json || !json.ok) { updateSyncBar('error'); return; }
     if (isMemberInputFocused()) return;
@@ -3658,6 +3723,8 @@ function startPoll() {
     renderPlanList();
     renderItemList();
     updateSyncBar('ok');
+    // 未送信の入力が残っていて、送信中でなければ再送する
+    if (_unsavedChanges && !_saveInFlight) flushProgressSave(1);
     // 個人タブが開いている場合は達成状態を最新化
     if (document.getElementById('panel-personal').classList.contains('active')) {
       renderPersonal();
@@ -3666,7 +3733,14 @@ function startPoll() {
     if (document.getElementById('panel-stock').classList.contains('active')) {
       renderStock();
     }
-  }, 30000);
+  } finally {
+    _pollBusy = false;
+  }
+}
+
+function startPoll() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollOnce, 30000);
 }
 
 // ============================================================
