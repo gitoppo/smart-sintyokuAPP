@@ -507,7 +507,15 @@ tr:nth-child(even) td{background:#f9f9f9;}
     </div>
     <div style="margin-bottom:10px;">
       <label style="font-size:12px;color:#666;">起点日</label>
-      <input type="date" id="msBaselineDate" style="width:100%;">
+      <input type="date" id="msBaselineDate" style="width:100%;" onchange="onMsBaselineDateChange()">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;color:#666;">起点在庫を数えたタイミング</label>
+      <select id="msBaselineTiming" style="width:100%;">
+        <option value="afterShip">出荷後・引き取り前に数えた実数（起点日当日の入荷は計算に入れる）</option>
+        <option value="afterPickup">起点日当日の記録はすべて起点在庫に含む（従来の扱い）</option>
+      </select>
+      <div style="font-size:11px;color:#999;margin-top:2px;">棚卸しは「出荷後・引き取り前」に数える運用です。起点日を変えると、この選択も自動で「出荷後・引き取り前」になります。</div>
     </div>
     <div style="margin-bottom:10px;">
       <label style="font-size:12px;color:#666;">補修分として除外する備考キーワード（カンマ区切り）</label>
@@ -626,7 +634,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '⑤材料在庫の入荷・返品履歴に、端末名・入力日時を表示するよう変更（データ自体は元々保存済みだった）';
+const APP_VERSION_NOTE = '材料在庫の起点に「数えたタイミング（出荷後・引き取り前）」を追加し、起点日当日の入荷を計算に入れられるよう変更。起点日以前の入荷・返品の登録時に警告を表示。確定ボタンの確認文を明確化';
 
 // ===== 状態 =====
 let st = {
@@ -3328,11 +3336,45 @@ function getShippedQtyByGroup(group, afterDate, uptoDate){
   return total;
 }
 
-// 現在庫数を算出：起点在庫 + 入荷 − 返品 − 出荷（起点日より後の分）
+// ===== 起点日の扱い =====
+// 棚卸し（実数を数えて起点在庫にする）を「出荷後・引き取り前」に行う運用では、
+// 起点日当日の出荷・返品は数えた実数に反映済みだが、当日の引き取り（入荷）はまだ含まれていない。
+// そのため起点日当日の入荷だけは計算に入れる必要がある（'afterShip'）。
+// 従来の設定（在庫表の数字から起点を作った場合など）は、起点日当日の記録をすべて計算に入れない（'afterPickup'）。
+// baselineTimingが無い既存の設定は従来どおり'afterPickup'として扱い、在庫数が突然変わらないようにする。
+function baselineTimingOf(settingsObj){
+  const s = settingsObj || st.materialStock.settings || {};
+  return s.baselineTiming==='afterShip' ? 'afterShip' : 'afterPickup';
+}
+function baselineTimingLabel(timing){
+  return timing==='afterShip' ? '出荷後・引き取り前に数えた実数' : '起点日当日の記録は起点在庫に含む（従来の扱い）';
+}
+// 入荷・返品が、起点日との関係で在庫計算に入るかどうか
+function isMovementCounted(m, baselineDate, timing){
+  if(!m || !m.date) return false;
+  if(m.date > baselineDate) return true;
+  return timing==='afterShip' && m.type==='入荷' && m.date===baselineDate; // 起点日当日の入荷だけは計算に入れる
+}
+// 計算に入らない日付で入荷・返品を登録しようとした時の、理由の説明文を返す（計算に入るなら空文字）
+function movementIgnoredReason(date, type, settingsObj){
+  const s = settingsObj || st.materialStock.settings || {};
+  if(!s.baselineDate || !(s.enabledGroups||[]).length) return '';
+  if(!date || (type!=='入荷' && type!=='返品')) return '';
+  const timing = baselineTimingOf(s);
+  if(isMovementCounted({date,type}, s.baselineDate, timing)) return '';
+  if(date === s.baselineDate){
+    if(type==='返品') return `この日付（${date}）は起点日です。起点日当日の返品は、起点在庫に含まれているものとして扱うため、在庫計算には入りません。`;
+    return `この日付（${date}）は起点日です。現在の設定（${baselineTimingLabel(timing)}）では、起点日当日の入荷は起点在庫に含まれているものとして扱うため、在庫計算には入りません。`;
+  }
+  return `この日付（${date}）は起点日（${s.baselineDate}）より前なので、起点在庫に含まれているものとして扱い、在庫計算には入りません。`;
+}
+
+// 現在庫数を算出：起点在庫 + 入荷 − 返品 − 出荷（起点日より後の分。起点日当日の扱いは baselineTimingOf 参照）
 // asOfDateを指定すると「その日時点」の在庫を計算できる（前日在庫チェック用）。省略時は従来どおり全期間（＝現在庫）
 function computeMaterialStock(asOfDate){
   const settings = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
   const baselineDate = settings.baselineDate || '0000-00-00';
+  const timing = baselineTimingOf(settings);
   const enabled = settings.enabledGroups || [];
   const groups = getMaterialGroupList().filter(g=>enabled.includes(g.name));
 
@@ -3340,7 +3382,7 @@ function computeMaterialStock(asOfDate){
     const baseline = parseInt(settings.baseline?.[g.name])||0;
     let nyuka = 0, henpin = 0;
     st.materialStock.movements.forEach(m=>{
-      if(m.group!==g.name || !m.date || m.date<=baselineDate) return;
+      if(m.group!==g.name || !isMovementCounted(m, baselineDate, timing)) return;
       if(asOfDate && m.date > asOfDate) return; // 基準日より後の入荷・返品は含めない
       if(m.type==='入荷') nyuka += parseInt(m.qty)||0;
       else if(m.type==='返品') henpin += parseInt(m.qty)||0;
@@ -3371,7 +3413,7 @@ function renderMaterialStockTable(){
         ${rows.map(r=>`<tr><td style="text-align:left;">${esc(r.dispName)}</td><td class="${r.qty<0?'ms-qty-low':''}">${r.qty<0?'⚠ ':''}${r.qty}</td></tr>`).join('')}
       </tbody>
     </table>
-    <div style="font-size:11px;color:#999;margin-top:6px;">起点日：${esc(settings.baselineDate)}　更新：${today()}時点</div>
+    <div style="font-size:11px;color:#999;margin-top:6px;">起点日：${esc(settings.baselineDate)}（${esc(baselineTimingLabel(baselineTimingOf(settings)))}）　更新：${today()}時点</div>
   `;
 }
 
@@ -3395,6 +3437,7 @@ function computeMaterialArrivalGaps(){
   const enabled = settings.enabledGroups || [];
   if(!enabled.length) return [];
   const baselineDate = settings.baselineDate || '0000-00-00';
+  const timing = baselineTimingOf(settings); // 出荷後・引き取り前の起点なら、起点日当日の引き取り（入荷）も確認対象にする
   const todayStr = today();
 
   const groupDispMap = {};
@@ -3421,7 +3464,7 @@ function computeMaterialArrivalGaps(){
   );
 
   return Object.keys(byDate)
-    .filter(d=> d > baselineDate && d <= todayStr && !movementDates.has(d))
+    .filter(d=> (timing==='afterShip' ? d >= baselineDate : d > baselineDate) && d <= todayStr && !movementDates.has(d))
     .sort((a,b)=>b.localeCompare(a)) // 新しい日付が上
     .map(d=>({ date:d, groups:[...byDate[d]].map(g=>groupDispMap[g]||g) }));
 }
@@ -3522,6 +3565,10 @@ async function addMaterialMovement(){
   if(!date){ toast('日付を入力してください'); return; }
   if(!group){ toast('対象グループを設定してください（⚙️設定）'); return; }
   if(qty<=0){ toast('数量を入力してください'); return; }
+
+  // 起点日との関係で在庫計算に入らない日付なら、「登録したのに在庫が増えない」と黙って落ちないよう確認する
+  const ignoredMsg = movementIgnoredReason(date, type);
+  if(ignoredMsg && !confirm(`⚠ ${ignoredMsg}\n\n起点在庫に含まれている分（起点日までに届いて数えた分）なら、このまま登録して構いません。\n起点日より後に届いた分なら、日付が正しいか確認してください。\n\n登録しますか？`)) return;
 
   const movement = {
     id:'mm_'+Date.now(), date, type, group, qty, memo,
@@ -3665,10 +3712,19 @@ function startPendingSyncRetry(){
   }, 20000); // 20秒おきに未確定の削除・追加を確認・再試行
 }
 
+// 設定モーダルを開いた時点の起点日。起点日を変えたら「数えたタイミング」を標準の運用（出荷後・引き取り前）に自動で切り替える
+let _msSavedBaselineDate = '';
+function onMsBaselineDateChange(){
+  const v = document.getElementById('msBaselineDate').value;
+  if(v && v !== _msSavedBaselineDate) document.getElementById('msBaselineTiming').value = 'afterShip';
+}
+
 function openMaterialStockSettings(){
   const groups = getMaterialGroupList();
   const settingsObj = st.materialStock.settings || {enabledGroups:[],baseline:{},baselineDate:'',repairKeywords:[]};
   document.getElementById('msBaselineDate').value = settingsObj.baselineDate||'';
+  _msSavedBaselineDate = settingsObj.baselineDate||'';
+  document.getElementById('msBaselineTiming').value = baselineTimingOf(settingsObj);
   document.getElementById('msRepairKeywords').value = (settingsObj.repairKeywords||[]).join(',');
   document.getElementById('msGroupSettingsList').innerHTML = groups.map(g=>{
     const checked = (settingsObj.enabledGroups||[]).includes(g.name);
@@ -3701,7 +3757,16 @@ async function saveMaterialStockSettingsFromModal(){
       baseline[g.name] = parseInt(document.getElementById('ms-base-'+g.name).value)||0;
     }
   });
-  const newSettings = {enabledGroups, baseline, baselineDate, repairKeywords};
+  const baselineTiming = document.getElementById('msBaselineTiming').value==='afterShip' ? 'afterShip' : 'afterPickup';
+  if(baselineTiming==='afterShip'){
+    // 起点日付けの入荷はこの設定だと計算に入る。実数に含めて数えていたなら二重になるため確認する
+    const sameDay = st.materialStock.movements.filter(m=>m.date===baselineDate && m.type==='入荷');
+    if(sameDay.length>0){
+      const total = sameDay.reduce((sum,m)=>sum+(parseInt(m.qty)||0),0);
+      if(!confirm(`起点日（${baselineDate}）付けの入荷が、すでに${sameDay.length}件（合計${total}台）あります。\n\n「出荷後・引き取り前に数えた実数」の設定では、これらは在庫計算に入ります。\n起点在庫の実数に、これらの入荷分を含めて数えていませんか？（含めている場合は二重に数えることになります）\n\nこのまま保存しますか？`)) return;
+    }
+  }
+  const newSettings = {enabledGroups, baseline, baselineDate, baselineTiming, repairKeywords};
   st.materialStock.settings = newSettings;
   saveLocalState();
   closeMaterialStockSettings();
@@ -3728,7 +3793,14 @@ async function confirmMaterialStockBaseline(){
   if(!settings.gasUrl){ toast('GAS URLを設定してください'); return; }
 
   const todayStr = today();
-  if(!confirm(`現在の計算結果（${todayStr}時点）を新しい起点在庫として確定します。\n入荷・返品の履歴はそのまま残ります（削除・アーカイブはされません）。\n\n実行しますか？`)) return;
+  // 本日付けの入荷がすでに入力済みなら、その入荷は在庫表の数字（＝この起点）に含まれる。
+  // まだなら、後から入力する本日付けの入荷は起点に含まれていないので、計算に入れる必要がある。
+  const hasTodayArrival = st.materialStock.movements.some(m=>m.date===todayStr && m.type==='入荷');
+  const newTiming = hasTodayArrival ? 'afterPickup' : 'afterShip';
+  const timingNote = hasTodayArrival
+    ? `本日（${todayStr}）付けの入荷はすでに入力済みのため、起点日当日の記録はすべて起点在庫に含まれ、今後は計算に入りません。`
+    : `本日（${todayStr}）付けの入荷はまだ入力されていないため、今後入力する本日付けの入荷は在庫計算に入ります（本日の出荷・返品は起点に含まれ、計算に入りません）。`;
+  if(!confirm(`現在の在庫表の数字（${todayStr}時点）を、新しい起点在庫として確定します。\n\n※ 実数を数えた値ではなく、在庫表の数字をそのまま起点にします。実数で入れ直す場合は「⚙️ 対象グループ・起点在庫の設定」から入力してください。\n\n${timingNote}\n入荷・返品の履歴はそのまま残ります（削除・アーカイブはされません）。\n\n実行しますか？`)) return;
 
   const rows = computeMaterialStock();
   const newBaseline = {};
@@ -3737,6 +3809,7 @@ async function confirmMaterialStockBaseline(){
     enabledGroups: curSettings.enabledGroups||[],
     baseline: newBaseline,
     baselineDate: todayStr,
+    baselineTiming: newTiming,
     repairKeywords: curSettings.repairKeywords||[]
   };
 
