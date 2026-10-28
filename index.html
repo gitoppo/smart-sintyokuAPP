@@ -607,6 +607,7 @@ window.addEventListener('DOMContentLoaded', () => {
   st.gasUrl = gasUrl;
   const dn = localStorage.getItem('deviceName_smart');
   if (dn) st.deviceName = dn;
+  restoreStockQueue();   // 前回、クラウドに届いていなかったストックの入力・削除・転記を読み戻す
 
   document.getElementById('gas-url-input').value = gasUrl;
   document.getElementById('device-name-input').value = st.deviceName;
@@ -618,6 +619,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   renderAll();
   startPoll();
+  setInterval(checkDateRollover, 60000);   // 開きっぱなしで日付をまたいだら、入力欄を今日のものに更新する
+  if (stockPendingCount() > 0) ensureUnsavedAlert();
   if (gasUrl) pullFromCloud();
   showAppVersion();
 });
@@ -626,7 +629,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // アプリバージョン表示（設定タブ）
 // ============================================================
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '進捗は自分の分だけ送信・保存失敗時は自動再送・取得は最大3回やり直し・全データ送信/除外解除に確認画面';
+const APP_VERSION_NOTE = '進捗は自分の分だけ送信・保存失敗時は自動再送・取得は最大3回やり直し・全データ送信/除外解除に確認画面・ストックは変更分だけ送信/失敗時再送/転記は②保存後に削除・日付またぎの±を保存値基準に';
 
 function showAppVersion() {
   const el = document.getElementById('appVersionDisplay');
@@ -642,6 +645,7 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-btn')[i].classList.toggle('active', t === tab);
     document.getElementById('panel-' + t).classList.toggle('active', t === tab);
   });
+  if (tab === 'personal' || tab === 'stock') checkDateRollover();
   if (tab === 'personal') renderPersonal();
   if (tab === 'stock') renderStock();
   if (tab === 'attend') {
@@ -1255,7 +1259,7 @@ function renderP2SheetBody(g) {
 
   // フォーカス中は書き換えない
   const focused = document.activeElement;
-  if (focused && focused.classList.contains('p2-num-input')) return;
+  if (focused && focused.classList.contains('p2-num-input') && !isStaleInput(focused)) return;
 
   body.innerHTML = g.items.map(r => {
     const planId = r.plan.id;
@@ -1263,7 +1267,7 @@ function renderP2SheetBody(g) {
     return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center${isDone ? ';opacity:0.5' : ''}">
       <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}${isDone ? ' ✅' : ''}</div>
       <button class="p2-adj-btn" onclick="p2Adjust('${planId}',-1)" ${isDone ? 'disabled' : ''}>－</button>
-      <input class="p2-num-input" type="number" id="p2-inp-${planId}"
+      <input class="p2-num-input" type="number" id="p2-inp-${planId}" data-date="${todayStr()}"
         value="${r.myTodayVal}" min="0"
         onchange="p2SetPost('${planId}',this.value)" ${isDone ? 'disabled' : ''}>
       <button class="p2-adj-btn" onclick="p2Adjust('${planId}',1)" ${isDone ? 'disabled' : ''}>＋</button>
@@ -1401,7 +1405,238 @@ function closeP2Sheet() {
 // 運用：st.stock[itemId] = { "端末名_YYYY-MM-DD": 数値 }（②個人タブのpostDoneと同形式）
 // ============================================================
 let _stockOpenGroup = null;
-let _stockDeletedIds = new Set(); // 明示的に削除したitemIdを記録（ポーリングで復活させない）
+let _stockDeletedIds = new Set(); // 削除を依頼中のitemId（取得したデータで復活させない。クラウドで消えたら外す）
+
+// ------------------------------------------------------------------
+// ストックの送信管理
+//  ・変更した品目だけを送る（他の日・他の品目まで送り直して、転記で消した数を復活させない）
+//  ・送信に失敗したら自動で再送し、届くまで「未送信」と表示する
+//  ・削除（品目・履歴1件・転記後の削除）も、届くまで再送する
+//  ・転記は「②への保存」が成功してから、ストックの削除を依頼する
+//  ・未送信分は localStorage に残すので、画面を再読み込みしても失われない
+// ------------------------------------------------------------------
+const STOCK_QUEUE_KEY = 'stockQueue_smart_v1';
+const STOCK_RETRY_DELAYS = [3000, 8000];   // 失敗したときのやり直し（3秒後・8秒後）
+let _stockDirty = {};          // { itemId: { 端末名_日付: { v:数値, seq:番号 } } }  まだクラウドに届いていない入力
+let _stockPendingDeletes = []; // [{ ids:[itemId], keys:{ itemId:[キー] } }]        まだ届いていない削除
+let _transferPending = null;   // { progress:{ planId:{ キー:値 } }, deleteIds:[itemId], total:件数 }  まだ届いていない転記
+let _stockDelKeys = new Set(); // 削除待ちの「itemId|キー」
+let _stockSeq = 0;
+let _stockInFlight = false;
+let _stockAgain = false;
+let _stockTimer = null;
+let _stockSentAt = {};         // { itemId: 最後に送信が成功した時刻 }
+let _transferJustDone = false;
+let _transferFailToastAt = 0;
+
+function persistStockQueue() {
+  try {
+    localStorage.setItem(STOCK_QUEUE_KEY, JSON.stringify({
+      dirty: _stockDirty, deletes: _stockPendingDeletes, transfer: _transferPending
+    }));
+  } catch(e) { console.warn('persistStockQueue:', e); }
+}
+
+function rebuildStockDeleteSets() {
+  _stockDeletedIds = new Set();
+  _stockDelKeys = new Set();
+  _stockPendingDeletes.forEach(b => {
+    (b.ids || []).forEach(id => _stockDeletedIds.add(id));
+    Object.entries(b.keys || {}).forEach(([i, ks]) => (ks || []).forEach(k => _stockDelKeys.add(i + '|' + k)));
+  });
+  if (_transferPending) (_transferPending.deleteIds || []).forEach(id => _stockDeletedIds.add(id));
+}
+
+function restoreStockQueue() {
+  try {
+    const raw = localStorage.getItem(STOCK_QUEUE_KEY);
+    if (raw) {
+      const q = JSON.parse(raw);
+      if (q && typeof q === 'object') {
+        if (q.dirty && typeof q.dirty === 'object') _stockDirty = q.dirty;
+        if (Array.isArray(q.deletes)) _stockPendingDeletes = q.deletes;
+        if (q.transfer && typeof q.transfer === 'object') _transferPending = q.transfer;
+      }
+    }
+  } catch(e) { _stockDirty = {}; _stockPendingDeletes = []; _transferPending = null; }
+  rebuildStockDeleteSets();
+  Object.values(_stockDirty).forEach(m => Object.values(m || {}).forEach(d => { if (d && d.seq > _stockSeq) _stockSeq = d.seq; }));
+  // 未送信の入力を画面にも反映する（保存されていない端末内のstockは、再読み込みで空になるため）
+  if (!st.stock || typeof st.stock !== 'object') st.stock = {};
+  Object.entries(_stockDirty).forEach(([itemId, m]) => {
+    if (_stockDeletedIds.has(itemId)) return;
+    if (!st.stock[itemId]) st.stock[itemId] = {};
+    Object.entries(m || {}).forEach(([k, d]) => { if (d) st.stock[itemId][k] = toNum(d.v); });
+  });
+}
+
+function stockDirtyCount() {
+  let n = 0;
+  Object.values(_stockDirty).forEach(m => { n += Object.keys(m || {}).length; });
+  return n;
+}
+function stockPendingCount() {
+  return stockDirtyCount() + _stockPendingDeletes.length + (_transferPending ? 1 : 0);
+}
+
+function stockMarkDirty(itemId, key, val) {
+  if (!_stockDirty[itemId]) _stockDirty[itemId] = {};
+  _stockDirty[itemId][key] = { v: toNum(val), seq: ++_stockSeq };
+  persistStockQueue();
+  ensureUnsavedAlert();
+  updateSyncBar('unsaved');
+}
+
+// 失敗したら、決まった間隔でやり直す。届いたらtrue、全て失敗したらfalse
+function postRetry(payload, delays) {
+  return new Promise(resolve => {
+    let i = 0;
+    const go = () => {
+      Cloud.post(payload, () => resolve(true), () => {
+        if (i < delays.length) setTimeout(go, delays[i++]);
+        else resolve(false);
+      });
+    };
+    go();
+  });
+}
+
+async function sendTransferProgress() {
+  const p = _transferPending;
+  if (!p) return true;
+  const progress = {};
+  Object.entries(p.progress || {}).forEach(([planId, kv]) => {
+    const cur = st.progress[planId];
+    // preDoneはGASが「送られなければ0に書き換える」ため、手元の値を付ける
+    progress[planId] = { preDone: toNum(cur && cur.preDone), postDone: Object.assign({}, kv) };
+  });
+  const ok = await postRetry({ action:'savePlansProgress', plans: st.plans, progress }, STOCK_RETRY_DELAYS);
+  if (!ok) return false;
+  // ②への保存が届いた。ここで初めて、ストックの削除を依頼する
+  _stockPendingDeletes.push({ ids: (p.deleteIds || []).slice() });
+  _transferPending = null;
+  _transferJustDone = true;
+  rebuildStockDeleteSets();
+  persistStockQueue();
+  return true;
+}
+
+async function sendStockDeletes() {
+  const batch = _stockPendingDeletes.slice();
+  if (!batch.length) return true;
+  const ids = [];
+  const keys = {};
+  batch.forEach(b => {
+    (b.ids || []).forEach(id => { if (!ids.includes(id)) ids.push(id); });
+    Object.entries(b.keys || {}).forEach(([i, ks]) => { keys[i] = (keys[i] || []).concat(ks || []); });
+  });
+  const payload = { action:'saveStock', stock: {}, isDelete: true };
+  if (ids.length) payload.deletedIds = ids;
+  if (Object.keys(keys).length) payload.deletedKeys = keys;
+  const ok = await postRetry(payload, STOCK_RETRY_DELAYS);
+  if (!ok) return false;
+  _stockPendingDeletes = _stockPendingDeletes.filter(b => !batch.includes(b));
+  rebuildStockDeleteSets();
+  persistStockQueue();
+  return true;
+}
+
+// 順番に処理する窓口：①転記の②への保存 → ②ストックの削除 → ③入力の送信。同時には1本だけ動く
+async function kickStockQueue() {
+  if (!gasUrl) return;
+  if (_stockInFlight) { _stockAgain = true; return; }
+  if (!stockPendingCount()) return;
+  _stockInFlight = true;
+  let failed = false;
+  let iter = 0;
+  try {
+    do {
+      _stockAgain = false;
+      if (_transferPending) {
+        if (!(await sendTransferProgress())) { failed = true; break; }
+      }
+      if (_stockPendingDeletes.length) {
+        if (!(await sendStockDeletes())) { failed = true; break; }
+      }
+      const stock = {};
+      const sent = {};
+      Object.entries(_stockDirty).forEach(([itemId, m]) => {
+        Object.entries(m || {}).forEach(([k, d]) => {
+          if (!d) return;
+          (stock[itemId] = stock[itemId] || {})[k] = toNum(d.v);
+          (sent[itemId] = sent[itemId] || {})[k] = d.seq;
+        });
+      });
+      if (Object.keys(stock).length) {
+        const ok = await postRetry({ action:'saveStock', stock }, STOCK_RETRY_DELAYS);
+        if (!ok) { failed = true; break; }
+        // 送信中に同じキーへ新しい入力があった分は残す（番号が同じものだけ「届いた」とみなす）
+        Object.entries(sent).forEach(([itemId, m]) => {
+          Object.entries(m).forEach(([k, seq]) => {
+            const cur = _stockDirty[itemId] && _stockDirty[itemId][k];
+            if (cur && cur.seq === seq) delete _stockDirty[itemId][k];
+          });
+          if (_stockDirty[itemId] && !Object.keys(_stockDirty[itemId]).length) delete _stockDirty[itemId];
+          _stockSentAt[itemId] = Date.now();
+        });
+        persistStockQueue();
+      }
+    } while (++iter < 10 && (_stockAgain || stockDirtyCount() > 0 || _stockPendingDeletes.length > 0 || _transferPending));
+  } finally {
+    _stockInFlight = false;
+  }
+  if (failed) {
+    updateSyncBar('error');
+    if (_transferPending && Date.now() - _transferFailToastAt > 60000) {
+      _transferFailToastAt = Date.now();
+      showToast('⚠️ 転記が、まだクラウドに届いていません。自動で再送します。この画面は閉じないでください。');
+    }
+  } else {
+    stockQueueDone();
+  }
+}
+
+function stockQueueDone() {
+  clearUnsavedAlertIfClean();
+  if (_transferJustDone && !stockPendingCount()) {
+    _transferJustDone = false;
+    showToast('✅ 転記がクラウドに届き、ストックの削除も完了しました');
+  }
+  updateSyncBar(hasUnsaved() ? 'unsaved' : 'ok');
+}
+
+function queueStockDelete(del) {
+  // 削除する品目・キーの未送信入力は、もう送る必要がない
+  (del.ids || []).forEach(id => { delete _stockDirty[id]; });
+  Object.entries(del.keys || {}).forEach(([id, ks]) => {
+    (ks || []).forEach(k => { if (_stockDirty[id]) { delete _stockDirty[id][k]; if (!Object.keys(_stockDirty[id]).length) delete _stockDirty[id]; } });
+  });
+  _stockPendingDeletes.push(del);
+  rebuildStockDeleteSets();
+  persistStockQueue();
+  ensureUnsavedAlert();
+  updateSyncBar('unsaved');
+  kickStockQueue();
+}
+
+// 日付が変わったのに、開きっぱなしの入力欄が前日の数字のままだったときの対処
+let _renderedDay = todayStr();
+function refreshForNewDay(showMsg) {
+  _renderedDay = todayStr();
+  const a = document.activeElement;
+  if (a && a.classList && (a.classList.contains('stock-num-input') || a.classList.contains('p2-num-input'))) a.blur();
+  try { renderPersonal(); renderStock(); } catch(e) { console.warn('refreshForNewDay:', e); }
+  if (showMsg) showToast('📅 日付が変わっていたので、今日の入力欄に更新しました。もう一度入力してください');
+}
+function checkDateRollover() {
+  if (todayStr() === _renderedDay) return false;
+  refreshForNewDay(false);
+  showToast('📅 日付が変わりました。今日の入力欄を更新しました');
+  return true;
+}
+function isStaleInput(inp) {
+  return !!(inp && inp.dataset && inp.dataset.date && inp.dataset.date !== todayStr());
+}
 
 function buildStockGroups() {
   const dn = st.deviceName;
@@ -1457,13 +1692,13 @@ function renderStockSheetBody(g) {
   document.getElementById('stock-sheet-title').innerHTML = `${esc(g.name)} <span style="font-size:13px;color:#fbbf24;font-weight:700">［ストック］</span>`;
   const body = document.getElementById('stock-sheet-body');
   const focused = document.activeElement;
-  if (focused && focused.classList.contains('stock-num-input')) return;
+  if (focused && focused.classList.contains('stock-num-input') && !isStaleInput(focused)) return;
   body.innerHTML = g.items.map(r => {
     const itemId = r.item.id;
     return `<div class="p2-color-row" style="flex-wrap:nowrap;align-items:center">
       <div class="p2-color-name" style="min-width:60px">${esc(r.colorName || '?')}</div>
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',-1)">－</button>
-      <input class="p2-num-input stock-num-input" type="number" id="stock-inp-${itemId}"
+      <input class="p2-num-input stock-num-input" type="number" id="stock-inp-${itemId}" data-date="${todayStr()}"
         value="${r.myTodayVal}" min="0"
         onchange="stockSetQty('${itemId}',this.value)">
       <button class="p2-adj-btn" onclick="stockAdjust('${itemId}',1)">＋</button>
@@ -1531,13 +1766,9 @@ function saveStockHistoryEdit(itemId, date) {
   if (!st.stock[itemId] || typeof st.stock[itemId] !== 'object') st.stock[itemId] = {};
   st.stock[itemId][key] = newVal;
   saveLocal();
-  // その日付キーのみ送信
-  markUnsaved();
-  Cloud.post(
-    { action:'saveStock', stock: { [itemId]: { [key]: newVal } } },
-    () => markSaved(),
-    () => updateSyncBar('error')
-  );
+  // その日付キーのみ送る。届くまで自動で再送し、未送信の間は画面に表示される
+  stockMarkDirty(itemId, key, newVal);
+  kickStockQueue();
   renderStock();
   showToast(`✏️ ${date}の入力を${newVal}個に修正しました`);
 }
@@ -1551,29 +1782,18 @@ function deleteStockHistoryEntry(itemId, date) {
     delete st.stock[itemId][key];
   }
   saveLocal();
-  markUnsaved();
-  // GAS側にもこのキーを消してもらうため、専用の削除リクエストを送る
-  Cloud.post(
-    { action:'saveStock', stock: {}, isDelete: true, deletedKeys: { [itemId]: [key] } },
-    () => markSaved(),
-    () => updateSyncBar('error')
-  );
+  // GAS側にもこのキーを消してもらう。届くまで自動で再送する
+  queueStockDelete({ keys: { [itemId]: [key] } });
   renderStock();
   showToast(`🗑 ${date}の入力を削除しました`);
 }
 
 function deleteStockItem(itemId, colorName) {
   if (!confirm(`「${colorName}」を削除しますか？\n全端末分の入力数量が消えます。`)) return;
-  const deletedIds = [itemId];
-  _stockDeletedIds.add(itemId);
   if (st.stock) delete st.stock[itemId];
   saveLocal();
-  // 削除操作：stockは空で送らず、deletedIdsのみGASに伝える
-  Cloud.post(
-    { action:'saveStock', stock: {}, isDelete: true, deletedIds },
-    () => { _stockDeletedIds.delete(itemId); updateSyncBar('ok'); },
-    () => updateSyncBar('error')
-  );
+  // 削除の依頼。届くまで自動で再送し、届くまでの間は取得したデータで復活させない
+  queueStockDelete({ ids: [itemId] });
   // グループ内に残りの品目があればボトムシートを更新、なければ閉じる
   const groups = buildStockGroups();
   const g = groups.find(gg => gg.name === _stockOpenGroup);
@@ -1590,17 +1810,11 @@ function askDeleteStockGroup(groupName) {
   if (!confirm(`「${groupName}」のストックを削除しますか？\n全端末分の入力数量も全て消えます。`)) return;
   const deletedIds = st.itemMaster.filter(it => dispN(it) === groupName).map(it => it.id);
   deletedIds.forEach(id => {
-    _stockDeletedIds.add(id);
     if (st.stock) delete st.stock[id];
   });
   closeStockSheet();
   saveLocal();
-  // 削除操作：stockは空で送らず、deletedIdsのみGASに伝える
-  Cloud.post(
-    { action:'saveStock', stock: {}, isDelete: true, deletedIds },
-    () => { deletedIds.forEach(id => _stockDeletedIds.delete(id)); updateSyncBar('ok'); },
-    () => updateSyncBar('error')
-  );
+  queueStockDelete({ ids: deletedIds });
   renderStock();
   showToast(`🗑 「${groupName}」のストックを削除しました`);
 }
@@ -1628,7 +1842,12 @@ function closeStockSheet() {
 
 function stockAdjust(itemId, delta) {
   const inp = document.getElementById('stock-inp-' + itemId);
-  const current = inp ? toNum(inp.value) : 0;
+  // 日付が変わったのに前日の表示のままなら、前日の数字に足してしまうので、更新だけして止める
+  if (isStaleInput(inp)) { refreshForNewDay(true); return; }
+  // 足し引きの元は「画面の数字」ではなく「保存されている今日の数字」にする
+  const dn = st.deviceName;
+  const entry = (st.stock && st.stock[itemId]) || {};
+  const current = dn ? toNum(entry[dn + '_' + todayStr()]) : 0;
   const newVal = Math.max(0, current + delta);
   if (inp) inp.value = newVal;
   stockSetQty(itemId, newVal);
@@ -1637,40 +1856,45 @@ function stockAdjust(itemId, delta) {
 function stockSetQty(itemId, val) {
   const dn = st.deviceName;
   if (!dn) { alert('端末名が未設定です。⚙️設定タブで設定してください。'); return; }
+  const inp = document.getElementById('stock-inp-' + itemId);
+  // 前日の表示のまま入力された場合は受け付けず、表示を更新する
+  if (isStaleInput(inp)) { refreshForNewDay(true); return; }
+  // 入力欄にカーソルが残ると画面が更新されなくなるため、入力が終わったら外す
+  if (inp && document.activeElement === inp) inp.blur();
   if (!st.stock) st.stock = {};
   if (!st.stock[itemId] || typeof st.stock[itemId] !== 'object') st.stock[itemId] = {};
   const dayKey = dn + '_' + todayStr();
-  st.stock[itemId][dayKey] = Math.max(0, toNum(val));
+  const v = Math.max(0, toNum(val));
+  st.stock[itemId][dayKey] = v;
   saveLocal();
-  debouncedStockSave();
+  stockMarkDirty(itemId, dayKey, v);   // 変更した品目のこのキーだけを送る（未送信として記録・再読込でも残る）
   renderStock();
+  clearTimeout(_stockTimer);
+  _stockTimer = setTimeout(kickStockQueue, 600);
 }
 
-let _stockSaveTimer = null;
 function debouncedStockSave() {
-  clearTimeout(_stockSaveTimer);
-  _stockSaveTimer = setTimeout(() => {
-    const dn = st.deviceName;
-    const today = todayStr();
-    if (!dn) return;
-    // 自端末の今日分のキーがある品目のみ送信（他端末のデータを上書きしないため）
-    const dayKey = dn + '_' + today;
-    const myStock = {};
-    Object.entries(st.stock || {}).forEach(([itemId, entry]) => {
-      if (entry && typeof entry === 'object' && dayKey in entry) {
-        myStock[itemId] = { [dayKey]: entry[dayKey] };
-      }
-    });
-    if (Object.keys(myStock).length === 0) return;
-    const payload = { action:'saveStock', stock: myStock };
-    Cloud.post(payload, () => markSaved(), () => updateSyncBar('error'));
-  }, 600);
+  // 旧名の互換：送信の窓口に任せる
+  clearTimeout(_stockTimer);
+  _stockTimer = setTimeout(kickStockQueue, 600);
 }
 
 // ============================================================
 // ストック→②個人タブへの転記
 // ============================================================
-function transferStockToProgress() {
+async function transferStockToProgress() {
+  // 転記の前に、最新のストックを取得する。
+  // 手元の値が古いまま転記すると、他の端末の最新の入力が含まれないまま、クラウドから消えてしまうため。
+  if (gasUrl) {
+    const fresh = await Cloud.get();
+    if (fresh && fresh.ok) {
+      applyCloudData(fresh, false);
+      saveLocal();
+      renderAll();
+    } else if (!confirm('最新のデータをクラウドから取得できませんでした。\n\nこのまま転記すると、他の端末が入力した最新の分が含まれない恐れがあります。\nそれでも続けますか？\n（「キャンセル」で止めて、同期が回復してからやり直せます）')) {
+      return;
+    }
+  }
   if (!st.stock || Object.keys(st.stock).length === 0) {
     alert('ストックデータがありません。');
     return;
@@ -1754,36 +1978,40 @@ function transferStockToProgress() {
   printStockTransferReport(transferList, skipList, today);
 
   // 転記実行
+  // ①②個人タブへ書き込む値を作る（端末名_今日 のキーごとの「合計の値」。何度送っても同じ結果になる）
+  const addKeys = {};   // planId -> { キー: 値 }
   transferList.forEach(t => {
     if (!st.progress[t.planId]) st.progress[t.planId] = { preDone: 0, postDone: {} };
+    if (!st.progress[t.planId].postDone) st.progress[t.planId].postDone = {};
+    const pd = st.progress[t.planId].postDone;
     // 全端末のデータをそのまま転記（端末名_日付キーを今日の日付に変換）
     Object.entries(t.entry).forEach(([key, val]) => {
       const m = key.match(/^(.+)_\d{4}-\d{2}-\d{2}$/);
       const deviceName = m ? m[1] : key;
       const newKey = deviceName + '_' + today;
-      const cur = toNum(st.progress[t.planId].postDone[newKey]);
-      st.progress[t.planId].postDone[newKey] = cur + toNum(val);
+      const cur = toNum(pd[newKey]);
+      pd[newKey] = cur + toNum(val);
+      if (!addKeys[t.planId]) addKeys[t.planId] = {};
+      addKeys[t.planId][newKey] = pd[newKey];
     });
   });
 
-  // 転記済み品目をストックから削除
-  deletedItemIds.forEach(itemId => {
-    if (st.stock) delete st.stock[itemId];
+  // ②へ届いたことを確認してから、ストックの削除を依頼する（順番は kickStockQueue が守る）。
+  // どちらも届くまで自動で再送し、届くまでは画面に「未送信」と出る。再読込しても残る。
+  // 手元ではすぐ非表示にする。
+  _transferPending = { progress: addKeys, deleteIds: deletedItemIds.slice(), total: transferList.length };
+  deletedItemIds.forEach(id => {
+    if (st.stock) delete st.stock[id];
+    delete _stockDirty[id];   // 消す品目の未送信入力は、もう送らない
   });
-
+  rebuildStockDeleteSets();
+  persistStockQueue();
   saveLocal();
-  Cloud.savePlansProgress(() => updateSyncBar('ok'), () => updateSyncBar('error'));
-  // 転記済み品目の削除：stockは空で送らず、deletedIdsのみGASに伝える
-  if (deletedItemIds.length > 0) {
-    deletedItemIds.forEach(id => _stockDeletedIds.add(id));
-    Cloud.post(
-      { action:'saveStock', stock: {}, isDelete: true, deletedIds: deletedItemIds },
-      () => { deletedItemIds.forEach(id => _stockDeletedIds.delete(id)); },
-      () => {}
-    );
-  }
+  ensureUnsavedAlert();
+  updateSyncBar('unsaved');
+  kickStockQueue();
   renderAll();
-  showToast(`📋 ${transferList.length}件を②個人タブへ転記しました`);
+  showToast(`📋 ${transferList.length}件を②個人タブへ転記しました（クラウドへ送信中）`);
 }
 
 function printStockTransferReport(transferList, skipList, today) {
@@ -1891,13 +2119,20 @@ function addStockGroup(groupName) {
 
 function p2Adjust(planId, delta) {
   const inp = document.getElementById('p2-inp-' + planId);
-  const current = inp ? toNum(inp.value) : 0;
+  // 日付が変わったのに前日の表示のままなら、前日の数字に足してしまうので、更新だけして止める
+  if (isStaleInput(inp)) { refreshForNewDay(true); return; }
+  // 足し引きの元は「画面の数字」ではなく「保存されている今日の数字」にする
+  const dn = st.deviceName;
+  const pd = (st.progress[planId] && st.progress[planId].postDone) || {};
+  const current = dn ? toNum(pd[dn + '_' + todayStr()]) : 0;
   const newVal = Math.max(0, current + delta);
   if (inp) inp.value = newVal;
   p2SetPost(planId, newVal);
 }
 
 function p2SetPost(planId, val) {
+  const inp = document.getElementById('p2-inp-' + planId);
+  if (isStaleInput(inp)) { refreshForNewDay(true); return; }
   setPost(planId, val);
 }
 
@@ -3048,14 +3283,18 @@ function importCsv(input) {
       const newStock = {};
       const newMasterMap = {};
       items.forEach(it => { newMasterMap[it.name + '_' + it.color] = it.id; });
+      const newDirty = {};
       oldMaster.forEach(oldIt => {
         const key = oldIt.name + '_' + oldIt.color;
         const newId = newMasterMap[key];
         if (newId && oldIt.id in st.stock) {
           newStock[newId] = st.stock[oldIt.id];
         }
+        if (newId && _stockDirty[oldIt.id]) newDirty[newId] = _stockDirty[oldIt.id];
       });
       st.stock = newStock;
+      _stockDirty = newDirty;
+      persistStockQueue();
     }
 
     saveLocal();
@@ -3327,31 +3566,41 @@ function applyCloudData(json, forceShiftAttend) {
   if (json.stock && typeof json.stock === 'object') {
     const dn = st.deviceName;
     const today = todayStr();
+    const dayKey = dn ? dn + '_' + today : null;
     const localStock = st.stock || {};
-    const stockInputFocused = !!(document.activeElement && document.activeElement.classList.contains('stock-num-input'));
+    const stockInputFocused = !!(document.activeElement && document.activeElement.classList.contains('stock-num-input') && !isStaleInput(document.activeElement));
 
-    // 自端末の今日分を退避
-    const myLocal = {};
+    // 手元の値を守る対象を集める
+    //  ①まだクラウドに届いていない入力（日付に関わらず）
+    //  ②自端末の今日の入力のうち、クラウドにその品目がある（または直前に送信した）もの
+    //    ※クラウドで消された品目（転記で削除された品目など）は、この端末の手元から復活させない
+    const protect = {};
+    const addProtect = (itemId, key, v) => { (protect[itemId] = protect[itemId] || {})[key] = toNum(v); };
     Object.entries(localStock).forEach(([itemId, entry]) => {
-      if (dn && entry && typeof entry === 'object') {
-        const dayKey = dn + '_' + today;
-        if (dayKey in entry) myLocal[itemId] = toNum(entry[dayKey]);
+      if (!entry || typeof entry !== 'object' || _stockDeletedIds.has(itemId)) return;
+      if (dayKey && dayKey in entry) {
+        const cloudHas = Object.prototype.hasOwnProperty.call(json.stock, itemId);
+        const recentlySent = (Date.now() - (_stockSentAt[itemId] || 0)) < 20000;
+        if (cloudHas || recentlySent) addProtect(itemId, dayKey, entry[dayKey]);
       }
+    });
+    Object.entries(_stockDirty).forEach(([itemId, m]) => {
+      if (_stockDeletedIds.has(itemId)) return;
+      Object.entries(m || {}).forEach(([k, d]) => { if (d) addProtect(itemId, k, d.v); });
     });
 
     if (!stockInputFocused) {
       st.stock = {};
       Object.entries(json.stock).forEach(([itemId, entry]) => {
         if (_stockDeletedIds.has(itemId)) return;
-        st.stock[itemId] = typeof entry === 'object' ? Object.assign({}, entry) : {};
+        const e = (entry && typeof entry === 'object') ? Object.assign({}, entry) : {};
+        Object.keys(e).forEach(k => { if (_stockDelKeys.has(itemId + '|' + k)) delete e[k]; });  // 削除を依頼中のキーは復活させない
+        st.stock[itemId] = e;
       });
-      if (dn) {
-        const dayKey = dn + '_' + today;
-        Object.entries(myLocal).forEach(([itemId, localVal]) => {
-          if (!st.stock[itemId]) st.stock[itemId] = {};
-          st.stock[itemId][dayKey] = localVal;
-        });
-      }
+      Object.entries(protect).forEach(([itemId, m]) => {
+        if (!st.stock[itemId]) st.stock[itemId] = {};
+        Object.assign(st.stock[itemId], m);
+      });
     }
   }
 }
@@ -3480,7 +3729,8 @@ async function pullFromCloud() {
   saveLocal();
   renderAll();
   showSyncStatus('☁️ クラウドから読み込み完了', true);
-  updateSyncBar(_unsavedChanges ? 'unsaved' : 'ok');
+  updateSyncBar(hasUnsaved() ? 'unsaved' : 'ok');
+  if (stockPendingCount() > 0) kickStockQueue();   // 起動時に、前回の未送信分があれば送る
 }
 
 // ============================================================
@@ -3509,7 +3759,7 @@ function updateSyncBar(status) {
   _lastSyncTime = new Date();
   // ※取得に成功しても、未送信の入力が残っていれば「✅」にせず、未送信の表示を保つ
   //   （以前は、取得の成功で未送信の印が消え、送れていない入力に気づけなかった）
-  if (_unsavedChanges) {
+  if (hasUnsaved()) {
     timeEl.textContent = '⚠️ 未送信のデータあり（送信中...）';
     timeEl.className = 'syncing';
     return;
@@ -3531,13 +3781,14 @@ async function manualSync() {
     const json = await Cloud.get();
     if (!json || !json.ok) { updateSyncBar('error'); return; }
     // 未送信データがある場合はstock・progressを保護しつつ反映
-    if (_unsavedChanges) {
+    if (hasUnsaved()) {
       showToast('⚠️ 未送信データを保護して同期しました');
     }
     applyCloudData(json, !_unsavedChanges);
     saveLocal();
     renderAll();
-    updateSyncBar(_unsavedChanges ? 'unsaved' : 'ok');
+    updateSyncBar(hasUnsaved() ? 'unsaved' : 'ok');
+    if (stockPendingCount() > 0) kickStockQueue();
   } catch(e) {
     updateSyncBar('error');
   } finally {
@@ -3551,44 +3802,58 @@ let _unsavedChanges = false; // 未送信フラグ
 let _unsavedSince = null;    // 未送信になった時刻
 let _unsavedAlertTimer = null; // 未送信アラートタイマー
 
-function markUnsaved() {
-  if (!_unsavedChanges) {
-    _unsavedChanges = true;
-    _unsavedSince = Date.now();
-    // 30秒経っても未送信なら目立つアラートを表示
-    _unsavedAlertTimer = setTimeout(() => {
-      if (_unsavedChanges) {
-        const el = document.getElementById('sync-bar-time');
-        if (el) {
-          el.style.animation = 'none';
-          el.style.background = '#7f1d1d';
-          el.style.color = '#fca5a5';
-          el.style.padding = '4px 8px';
-          el.style.borderRadius = '4px';
-          el.style.fontWeight = '700';
-          el.textContent = '❌ 未送信データあり！手動更新ボタンを押してください';
-        }
-        showToast('⚠️ データが長時間送信されていません。「🔄 今すぐ更新」を押してください。');
+// 未送信が30秒続いたら目立つ警告を出す（進捗・ストックの両方で共通）
+function ensureUnsavedAlert() {
+  if (_unsavedAlertTimer) return;
+  if (!_unsavedSince) _unsavedSince = Date.now();
+  _unsavedAlertTimer = setTimeout(() => {
+    _unsavedAlertTimer = null;
+    if (hasUnsaved()) {
+      const el = document.getElementById('sync-bar-time');
+      if (el) {
+        el.style.animation = 'none';
+        el.style.background = '#7f1d1d';
+        el.style.color = '#fca5a5';
+        el.style.padding = '4px 8px';
+        el.style.borderRadius = '4px';
+        el.style.fontWeight = '700';
+        el.textContent = '❌ 未送信データあり！手動更新ボタンを押してください';
       }
-    }, 30000);
-  }
+      showToast('⚠️ データが長時間送信されていません。「🔄 今すぐ更新」を押してください。');
+    }
+  }, 30000);
+}
+
+// 進捗にもストックにも未送信が無ければ、警告の表示と待ち時間を元に戻す
+function clearUnsavedAlertIfClean() {
+  if (hasUnsaved()) return;
+  _unsavedSince = null;
+  clearTimeout(_unsavedAlertTimer);
+  _unsavedAlertTimer = null;
+  const el = document.getElementById('sync-bar-time');
+  if (el) { el.style.background = ''; el.style.padding = ''; el.style.borderRadius = ''; el.style.fontWeight = ''; }
+}
+
+// 未送信があるか（進捗・ストックのどちらか）
+function hasUnsaved() {
+  return _unsavedChanges || stockPendingCount() > 0;
+}
+
+function markUnsaved() {
+  _unsavedChanges = true;
+  ensureUnsavedAlert();
   updateSyncBar('unsaved');
 }
 
 function markSaved() {
   _unsavedChanges = false;
-  _unsavedSince = null;
-  clearTimeout(_unsavedAlertTimer);
-  _unsavedAlertTimer = null;
-  // アラート表示をリセット
-  const el = document.getElementById('sync-bar-time');
-  if (el) { el.style.background = ''; el.style.padding = ''; el.style.borderRadius = ''; el.style.fontWeight = ''; }
+  clearUnsavedAlertIfClean();
   updateSyncBar('ok');
 }
 
 // ページを閉じる前に未送信データがあれば警告
 window.addEventListener('beforeunload', e => {
-  if (_unsavedChanges) {
+  if (hasUnsaved()) {
     e.preventDefault();
     e.returnValue = '未送信のデータがあります。このまま閉じると入力内容が失われる可能性があります。';
   }
@@ -3608,9 +3873,25 @@ document.addEventListener('visibilitychange', () => {
         }).catch(() => {});
       } catch(e) {}
     }
+    // ストックの未送信入力（変更した分だけ）も、すぐ送る。届かなくても、手元に残るので次に再送される
+    if (gasUrl && stockDirtyCount() > 0 && !_stockPendingDeletes.length && !_transferPending) {
+      try {
+        const stock = {};
+        Object.entries(_stockDirty).forEach(([itemId, m]) => Object.entries(m || {}).forEach(([k, d]) => {
+          if (d) (stock[itemId] = stock[itemId] || {})[k] = toNum(d.v);
+        }));
+        fetch(`${gasUrl}?v=${Date.now()}`, {
+          method:'POST', redirect:'follow', cache:'no-store', keepalive: true,
+          headers:{ 'Content-Type':'text/plain;charset=UTF-8' },
+          body: JSON.stringify({ action:'saveStock', stock })
+        }).catch(() => {});
+      } catch(e) {}
+    }
   } else if (document.visibilityState === 'visible') {
-    // 画面が戻ったとき：未送信が残っていれば再送し、最新のデータを取り込む
+    // 画面が戻ったとき：日付が変わっていれば入力欄を今日のものに更新し、未送信が残っていれば再送し、最新のデータを取り込む
+    checkDateRollover();
     if (_unsavedChanges && !_saveInFlight) flushProgressSave(1);
+    if (stockPendingCount() > 0) kickStockQueue();
     if (typeof pollOnce === 'function') pollOnce();
   }
 });
@@ -3702,6 +3983,7 @@ function isMemberInputFocused() {
 let _pollBusy = false;
 // 自動更新の1回分。30秒ごと、および画面が戻ったときに呼ぶ
 async function pollOnce() {
+  if (document.visibilityState !== 'hidden') checkDateRollover();   // 日付が変わっていたら、入力欄を今日のものに更新
   if (!gasUrl || isMemberInputFocused()) return;
   if (_pollBusy) return;                                    // 前回の取得が終わっていなければ重ねない
   if (document.visibilityState === 'hidden') return;        // 画面が隠れている間は取得しない（GASへの無駄な負荷を避ける）
@@ -3725,6 +4007,7 @@ async function pollOnce() {
     updateSyncBar('ok');
     // 未送信の入力が残っていて、送信中でなければ再送する
     if (_unsavedChanges && !_saveInFlight) flushProgressSave(1);
+    if (stockPendingCount() > 0) kickStockQueue();
     // 個人タブが開いている場合は達成状態を最新化
     if (document.getElementById('panel-personal').classList.contains('active')) {
       renderPersonal();
