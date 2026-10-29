@@ -3,7 +3,9 @@
 // ============================================================
 //
 // ▼変更履歴管理（GAS_CHANGELOG.md）
-// 内部バージョン: v5  (2026-10-05)
+// 内部バージョン: v6  (2026-10-06)
+// v6: archiveMaterialMovements_ が、棚卸し記録（type:'棚卸し'）をアーカイブしないように変更
+//     （事務アプリに追加した「棚卸しを記録」の履歴を、14日を過ぎても残すため）
 // v5: getEverything_ も同様に、操作ログ（operationLog）を読まず空配列を返すように変更
 //     （進捗アプリが getEverything を呼んでいないこと、どちらのアプリも操作ログを使っていないことを確認済み）
 // v4: getAll_ が操作ログ（operationLog）の全件を返していたのをやめ、空配列を返すように変更
@@ -882,8 +884,10 @@ function archiveMaterialMovements_(p) {
     if (!cutoffDate) return errRes('cutoffDate is required');
 
     const movements = readJsonSheet_(ss, 'materialMovements');
-    const toArchive = movements.filter(function (m) { return m.date && m.date <= cutoffDate; });
-    const remaining = movements.filter(function (m) { return !(m.date && m.date <= cutoffDate); });
+    // 棚卸し記録（type:'棚卸し'）は、実数と在庫表の差の推移を長く見られるよう、日付に関係なく本体に残す（v6）
+    const isArchiveTarget = function (m) { return m.date && m.date <= cutoffDate && m.type !== '棚卸し'; };
+    const toArchive = movements.filter(isArchiveTarget);
+    const remaining = movements.filter(function (m) { return !isArchiveTarget(m); });
 
     if (toArchive.length > 0) {
       // 本体スプレッドシートを肥大化させないよう、外部の保管庫スプレッドシートへ書き込む
