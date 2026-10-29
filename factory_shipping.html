@@ -114,6 +114,13 @@ tr:nth-child(even) td{background:#f9f9f9;}
 #msSettingsModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9992;display:none;align-items:center;justify-content:center;}
 #msSettingsModal.open{display:flex;}
 #msSettingsModalInner{background:#fff;border-radius:8px;padding:20px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto;}
+#msCountModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9992;display:none;align-items:center;justify-content:center;}
+#msCountModal.open{display:flex;}
+#msCountModalInner{background:#fff;border-radius:8px;padding:20px;width:94%;max-width:540px;max-height:90vh;overflow-y:auto;}
+.msCountRow{display:grid;grid-template-columns:1fr 64px 84px 56px;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
+.msCountRow input[type=number]{width:100%;font-size:14px;padding:4px 6px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;}
+.msCountHead{font-size:11px;color:#666;font-weight:bold;border-bottom:2px solid #ddd;}
+.msCountBookVal,.msCountDiff{text-align:center;}
 .msGroupRow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f0f0f0;}
 .msGroupRow label{flex:1;font-size:13px;}
 .msGroupRow input[type=number]{width:80px;font-size:14px;padding:4px 6px;border:1px solid #ccc;border-radius:6px;}
@@ -188,7 +195,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
 @media print{
   @page{margin:10mm 6mm;size:A4 portrait;}
   body{background:#fff;font-size:10.5pt;}
-  #tabBar,#toast,#loading,#editModal,#cmModal,#msSettingsModal,#manualSlipModal,#bs,#bs-overlay,.no-print{display:none!important;}
+  #tabBar,#toast,#loading,#editModal,#cmModal,#msSettingsModal,#msCountModal,#manualSlipModal,#bs,#bs-overlay,.no-print{display:none!important;}
   .tabContent{display:none!important;}
   #printArea{display:block!important;}
 
@@ -412,6 +419,7 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <button class="btn-gray btn-sm" onclick="openMaterialStockSettings()">⚙️ 対象グループ・起点在庫の設定</button>
       <button class="btn-success no-print" onclick="printMaterialStock()">🖨 在庫表を印刷</button>
+      <button class="btn-primary btn-sm no-print" onclick="openMaterialStockCount()">📋 棚卸しを記録</button>
       <button class="btn-warn btn-sm no-print" onclick="confirmMaterialStockBaseline()">📌 現在庫を新しい起点として確定</button>
     </div>
     <div id="materialStockTable"></div>
@@ -460,6 +468,14 @@ tr:nth-child(even) td{background:#f9f9f9;}
     </div>
     <div id="pendingDeleteBanner" style="display:none;background:#fff3cd;border:1px solid #ffe08a;color:#8a6a1a;padding:8px 12px;border-radius:4px;font-size:12.5px;margin-bottom:10px;"></div>
     <div id="materialMovementList"></div>
+  </div>
+
+  <div class="card">
+    <div class="cardTitle">📋 棚卸し記録（実数と在庫表の差）</div>
+    <div style="font-size:12px;color:#666;margin-bottom:8px;">
+      「📋 棚卸しを記録」で残した記録です。差が出た時期や、同じ向きのズレが続いていないかを確認できます（入荷・返品の数字には影響しません）。
+    </div>
+    <div id="materialCountHistory"></div>
   </div>
 </div>
 
@@ -526,6 +542,38 @@ tr:nth-child(even) td{background:#f9f9f9;}
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button class="btn-success" onclick="saveMaterialStockSettingsFromModal()">💾 保存</button>
       <button class="btn-gray" onclick="closeMaterialStockSettings()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- 材料在庫 棚卸し記録モーダル -->
+<div id="msCountModal">
+  <div id="msCountModalInner">
+    <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">📋 棚卸し（実数の記録）</div>
+    <div style="font-size:12px;color:#666;margin-bottom:10px;">
+      「出荷後・引き取り前」に数えた実数を入力してください（数えたグループだけで構いません）。<br>
+      在庫表との差を自動で計算し、棚卸し記録として残します。入荷・返品の数字や在庫表は変わりません。
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;color:#666;">棚卸し日</label>
+      <input type="date" id="msCountDate" style="width:100%;" onchange="renderMaterialCountRows()">
+    </div>
+    <div id="msCountArrivalWarn"></div>
+    <div id="msCountPendingBox" style="display:none;background:#f7f8fb;border:1px solid #dde;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;">
+      <div style="margin-bottom:4px;">未出荷の納品書・日付が先の返品があります（在庫表はすでに引いています）。数えた実数に、これらの出荷待ちの品物は：</div>
+      <label style="display:block;margin:2px 0;"><input type="radio" name="msCountInclPending" value="no" checked onchange="onMsCountInput()"> 含めていない（在庫表の数とそのまま比べる）</label>
+      <label style="display:block;margin:2px 0;"><input type="radio" name="msCountInclPending" value="yes" onchange="onMsCountInput()"> 含めている（未出荷分を戻した数と比べる）</label>
+    </div>
+    <div class="msCountRow msCountHead"><div>品目グループ</div><div style="text-align:center;">在庫表</div><div style="text-align:center;">実数</div><div style="text-align:center;">差</div></div>
+    <div id="msCountRows" style="max-height:40vh;overflow-y:auto;"></div>
+    <div id="msCountSummary" style="font-size:12px;margin:8px 0;color:#666;"></div>
+    <label style="font-size:12px;display:flex;gap:6px;align-items:flex-start;margin:8px 0;">
+      <input type="checkbox" id="msCountAdopt" style="margin-top:2px;">
+      <span>この実数を新しい起点在庫にする<br><span style="color:#999;">（起点日＝棚卸し日。数えていないグループは、在庫表の数字を引き継ぎます）</span></span>
+    </label>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn-success" onclick="saveMaterialStockCount()">💾 記録する</button>
+      <button class="btn-gray" onclick="closeMaterialStockCount()">キャンセル</button>
     </div>
   </div>
 </div>
@@ -634,7 +682,7 @@ const TAX_RATE = 0.10;
 // コードを更新するたびに、日時と内容を1行で更新してください。
 // ⚙️設定タブに常時表示され、「更新がその端末に反映されているか」をその場で確認できるようにするためのものです。
 // 変更内容のメモだけをここで管理する（日時は自動取得するため手打ち不要）
-const APP_VERSION_NOTE = '材料在庫の起点に「数えたタイミング（出荷後・引き取り前）」を追加し、起点日当日の入荷を計算に入れられるよう変更。起点日以前の入荷・返品の登録時に警告を表示。確定ボタンの確認文を明確化';
+const APP_VERSION_NOTE = '⑤材料在庫に「棚卸しを記録」（実数と在庫表の差を履歴に保存）と「未出荷分を戻した数」の併記を追加。確定ボタンが、日付が先の納品書を二重に引いていた不具合を修正';
 
 // ===== 状態 =====
 let st = {
@@ -3405,14 +3453,24 @@ function renderMaterialStockTable(){
   const rows = computeMaterialStock();
   updateMaterialStockWarnBadge(rows);
   const negRows = rows.filter(r=>r.qty<0);
+  // 納品書は前日に作ることが多いため、在庫表の数は「出荷日がまだ先の納品書」「日付が先の返品」も先に引いている。
+  // 品物はまだ倉庫にあるので、実数と比べる時のために「未出荷分を戻した数」を併記する（未出荷分がある時だけ）
+  const pend = computeMaterialPending(today());
+  const hasPend = rows.some(r=>{ const p=pend[r.group]; return p && (p.ship||p.ret||p.arr); });
+  const pendCell = r=>{
+    const p = pend[r.group] || {ship:0,ret:0,arr:0};
+    const parts = [p.ship?`納品書+${p.ship}`:'', p.ret?`返品+${p.ret}`:'', p.arr?`入荷−${p.arr}`:''].filter(x=>x);
+    return `<td>${r.qty + p.ship + p.ret - p.arr}${parts.length?`<div style="font-size:10px;color:#888;">${parts.join('　')}</div>`:''}</td>`;
+  };
   el.innerHTML = `
     ${negRows.length>0?`<div style="background:#f8d7da;color:#842029;font-size:12px;padding:8px 10px;border-radius:4px;margin-bottom:8px;">⚠ 在庫がマイナスの品目があります。入荷登録の漏れなど、入力に誤りがないかご確認ください。<br>（現実には在庫がマイナスになることはあり得ないため、マイナス表示＝どこかの入力が間違っているサインです）</div>`:''}
     <table class="msStockTable">
-      <thead><tr><th>品目グループ</th><th>現在庫数</th></tr></thead>
+      <thead><tr><th>品目グループ</th><th>現在庫数</th>${hasPend?'<th>未出荷分を戻した数</th>':''}</tr></thead>
       <tbody>
-        ${rows.map(r=>`<tr><td style="text-align:left;">${esc(r.dispName)}</td><td class="${r.qty<0?'ms-qty-low':''}">${r.qty<0?'⚠ ':''}${r.qty}</td></tr>`).join('')}
+        ${rows.map(r=>`<tr><td style="text-align:left;">${esc(r.dispName)}</td><td class="${r.qty<0?'ms-qty-low':''}">${r.qty<0?'⚠ ':''}${r.qty}</td>${hasPend?pendCell(r):''}</tr>`).join('')}
       </tbody>
     </table>
+    ${hasPend?`<div style="font-size:11px;color:#666;margin-top:6px;line-height:1.5;">※ 納品書は前日に作ることが多いため、「現在庫数」は出荷日がまだ先の納品書・日付が先の返品も先に引いています。倉庫に残っている出荷待ちの品物も数えに含める場合は、「未出荷分を戻した数」と実数を比べてください。</div>`:''}
     <div style="font-size:11px;color:#999;margin-top:6px;">起点日：${esc(settings.baselineDate)}（${esc(baselineTimingLabel(baselineTimingOf(settings)))}）　更新：${today()}時点</div>
   `;
 }
@@ -3548,6 +3606,302 @@ async function markNoArrival(date){
   }
 }
 
+// ===== 未出荷分の集計（C）・棚卸し記録（D） =====
+// 納品書は前日に作ることが多いため、在庫表（computeMaterialStock()）は、出荷日がまだ先の納品書や
+// 日付が先の返品・入荷も、先に反映している。品物はまだ倉庫にある（入荷は未到着）ので、
+// 実数と比べる時は、これらを戻した数と比べる必要がある。
+// refDateより後の日付の納品書（出荷）・返品・入荷を、グループごとに集計する。
+function computeMaterialPending(refDate){
+  const s = st.materialStock.settings || {};
+  const baselineDate = s.baselineDate || '0000-00-00';
+  const timing = baselineTimingOf(s);
+  const after = refDate > baselineDate ? refDate : baselineDate;
+  const result = {};
+  (s.enabledGroups||[]).forEach(g=>{
+    const ship = getShippedQtyByGroup(g, after); // 出荷日がafterより後の納品書（補修分は除外済み）
+    let ret = 0, arr = 0;
+    st.materialStock.movements.forEach(m=>{
+      if(m.group!==g || !m.date || m.date<=refDate) return;
+      if(!isMovementCounted(m, baselineDate, timing)) return;
+      if(m.type==='返品') ret += parseInt(m.qty)||0;
+      else if(m.type==='入荷') arr += parseInt(m.qty)||0;
+    });
+    result[g] = {ship, ret, arr};
+  });
+  return result;
+}
+
+// 指定日付けで、在庫計算に入っている入荷の合計（棚卸しは「引き取り前」に数えるため、比較の時は除く）
+function arrivalsCountedOn(group, dateStr){
+  const s = st.materialStock.settings || {};
+  const bd = s.baselineDate || '0000-00-00';
+  const t = baselineTimingOf(s);
+  let n = 0;
+  st.materialStock.movements.forEach(m=>{
+    if(m.group===group && m.type==='入荷' && m.date===dateStr && isMovementCounted(m, bd, t)) n += parseInt(m.qty)||0;
+  });
+  return n;
+}
+
+// 棚卸しで実数と比べる数をグループごとに返す
+//   book         : 在庫表の数（棚卸し日付けの入荷を除いた＝引き取り前の数）
+//   ship/ret/arr : 棚卸し日より後の未出荷の納品書／日付が先の返品／日付が先の入荷
+//   expectedIncl : 倉庫に残っている出荷待ちの品物も数えた場合の、実数の期待値
+function computeCountReference(countDate){
+  const pend = computeMaterialPending(countDate);
+  const out = {};
+  computeMaterialStock().forEach(r=>{
+    const p = pend[r.group] || {ship:0,ret:0,arr:0};
+    const arrToday = arrivalsCountedOn(r.group, countDate);
+    const book = r.qty - arrToday;
+    out[r.group] = {dispName:r.dispName, book, ship:p.ship, ret:p.ret, arr:p.arr, arrToday,
+                    expectedIncl: book + p.ship + p.ret - p.arr};
+  });
+  return out;
+}
+
+// 起点にする時、実数を数えていないグループに引き継ぐ数（棚卸し日までの記録を反映した、引き取り前の在庫）
+function computeBaselineSnapshot(countDate){
+  const m = {};
+  computeMaterialStock(countDate).forEach(r=>{ m[r.group] = r.qty - arrivalsCountedOn(r.group, countDate); });
+  return m;
+}
+
+let _msCountTyped = {}; // グループ名→入力途中の実数（日付を変えて再描画しても、入力を残す）
+let _msCountRef = {};
+
+function openMaterialStockCount(){
+  const s = st.materialStock.settings || {};
+  if(!s.baselineDate || !(s.enabledGroups||[]).length){ toast('先に「⚙️ 対象グループ・起点在庫の設定」を行ってください'); return; }
+  document.getElementById('msCountDate').value = today();
+  document.getElementById('msCountAdopt').checked = false;
+  const no = document.querySelector('input[name="msCountInclPending"][value="no"]');
+  if(no) no.checked = true;
+  _msCountTyped = {};
+  renderMaterialCountRows();
+  document.getElementById('msCountModal').classList.add('open');
+}
+function closeMaterialStockCount(){
+  document.getElementById('msCountModal').classList.remove('open');
+}
+
+function renderMaterialCountRows(){
+  document.querySelectorAll('#msCountRows .msCountInput').forEach(el=>{ _msCountTyped[el.dataset.group] = el.value; });
+  const date = document.getElementById('msCountDate').value || today();
+  _msCountRef = computeCountReference(date);
+  let anyPending = false;
+  const arrGroups = [];
+  const rowsHtml = Object.keys(_msCountRef).map(g=>{
+    const r = _msCountRef[g];
+    const hasP = !!(r.ship || r.ret || r.arr);
+    if(hasP) anyPending = true;
+    if(r.arrToday) arrGroups.push(r.dispName);
+    const parts = [r.ship?`納品書 +${r.ship}`:'', r.ret?`返品 +${r.ret}`:'', r.arr?`入荷 −${r.arr}`:''].filter(x=>x);
+    const note = hasP ? `<div style="font-size:10px;color:#888;">未出荷：${parts.join('　')}</div>` : '';
+    return `<div class="msCountRow">
+      <div>${esc(r.dispName)}${note}</div>
+      <div class="msCountBookVal">${r.book}</div>
+      <input type="number" min="0" class="msCountInput" data-group="${esc(g)}" placeholder="実数" value="${esc(_msCountTyped[g]??'')}" oninput="onMsCountInput()">
+      <div class="msCountDiff">—</div>
+    </div>`;
+  }).join('');
+  document.getElementById('msCountRows').innerHTML = rowsHtml;
+  document.getElementById('msCountPendingBox').style.display = anyPending ? 'block' : 'none';
+  document.getElementById('msCountArrivalWarn').innerHTML = arrGroups.length
+    ? `<div style="background:#fff3cd;border:1px solid #ffe08a;color:#8a6a1a;border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:12px;">⚠ この日付（${esc(date)}）の入荷が、すでに入力されています（${esc(arrGroups.join('・'))}）。「在庫表」の列は、その入荷を除いた「引き取り前」の数です。</div>`
+    : '';
+  onMsCountInput();
+}
+
+function msCountInclPending(){
+  const el = document.querySelector('input[name="msCountInclPending"]:checked');
+  return !!el && el.value==='yes' && document.getElementById('msCountPendingBox').style.display!=='none';
+}
+
+function onMsCountInput(){
+  const incl = msCountInclPending();
+  let entered = 0, withDiff = 0;
+  document.querySelectorAll('#msCountRows .msCountRow').forEach(row=>{
+    const inp = row.querySelector('.msCountInput');
+    const r = _msCountRef[inp.dataset.group];
+    if(!r) return;
+    const target = incl ? r.expectedIncl : r.book;
+    row.querySelector('.msCountBookVal').textContent = target;
+    const diffEl = row.querySelector('.msCountDiff');
+    const counted = parseInt(inp.value);
+    if(inp.value==='' || isNaN(counted)){ diffEl.textContent = '—'; diffEl.style.color = '#999'; diffEl.style.fontWeight = 'normal'; return; }
+    const d = counted - target;
+    entered++; if(d!==0) withDiff++;
+    diffEl.textContent = d===0 ? '±0' : (d>0?'+':'−')+Math.abs(d);
+    diffEl.style.color = d===0 ? '#2e7d32' : '#c0392b';
+    diffEl.style.fontWeight = 'bold';
+  });
+  const sum = document.getElementById('msCountSummary');
+  if(sum) sum.textContent = entered===0 ? '数えたグループの実数を入力してください' : `入力済み ${entered}グループ（差あり ${withDiff}）`;
+}
+
+async function saveMaterialStockCount(){
+  const date = document.getElementById('msCountDate').value;
+  if(!date){ toast('棚卸し日を入力してください'); return; }
+  const settingsObj = st.materialStock.settings || {};
+  const incl = msCountInclPending();
+  const adopt = document.getElementById('msCountAdopt').checked;
+  const ref = computeCountReference(date);
+
+  const counted = {};
+  let bad = false;
+  document.querySelectorAll('#msCountRows .msCountInput').forEach(el=>{
+    if(el.value==='') return;
+    const n = parseInt(el.value);
+    if(isNaN(n) || n<0){ bad = true; return; }
+    counted[el.dataset.group] = n;
+  });
+  if(bad){ toast('実数は0以上の数字で入力してください'); return; }
+  const groups = Object.keys(counted);
+  if(groups.length===0){ toast('数えたグループの実数を入力してください'); return; }
+
+  // 実数を新しい起点にする場合：保存の前に確認する
+  let newSettings = null;
+  if(adopt){
+    const curBase = settingsObj.baselineDate || '';
+    if(curBase && date < curBase){ toast(`現在の起点日（${curBase}）より前の日付は、起点にできません`); return; }
+    const sameDay = st.materialStock.movements.filter(m=>m.date===date && m.type==='入荷');
+    if(sameDay.length>0){
+      const total = sameDay.reduce((sum,m)=>sum+(parseInt(m.qty)||0),0);
+      if(!confirm(`棚卸し日（${date}）付けの入荷が、すでに${sameDay.length}件（合計${total}台）あります。\n\n起点にすると、これらは在庫計算に入ります（出荷後・引き取り前の起点のため）。\n数えた実数に、これらの入荷分を含めていませんか？（含めている場合は二重に数えることになります）\n\nこのまま続けますか？`)) return;
+    }
+    const snapshot = computeBaselineSnapshot(date);
+    const enabled = settingsObj.enabledGroups || [];
+    const newBaseline = {};
+    enabled.forEach(g=>{
+      if(counted[g]!==undefined){
+        const r = ref[g];
+        // 実数に未出荷分を含めていない場合は、その分（これから出荷・返品される分）を足して起点にする
+        // （これから日付が来た時に引かれるので、足しておかないと二重に引かれる）
+        newBaseline[g] = counted[g] + (incl ? 0 : (r.ship + r.ret - r.arr));
+      } else {
+        newBaseline[g] = snapshot[g] ?? (parseInt(settingsObj.baseline?.[g])||0);
+      }
+    });
+    const uncounted = enabled.length - groups.length;
+    if(!confirm(`この実数を新しい起点在庫にします。\n\n起点日：${date}（出荷後・引き取り前に数えた実数）\n実数で入れ直すグループ：${groups.length}\n数えていないグループ（${uncounted}）：在庫表の数字（引き取り前）を引き継ぎます\n\n※ 起点日より前の入荷・返品・出荷は、今後の計算に入りません。\n\n実行しますか？`)) return;
+    newSettings = {enabledGroups: enabled, baseline: newBaseline, baselineDate: date, baselineTiming: 'afterShip', repairKeywords: settingsObj.repairKeywords||[]};
+  }
+
+  // 棚卸し記録（type:'棚卸し'）。入荷・返品とは別の種別なので、在庫計算・記録漏れチェックには影響しない
+  const ts = new Date().toISOString();
+  const base = Date.now();
+  const sessionId = 'cs_'+base;
+  const records = groups.map((g,i)=>{
+    const r = ref[g];
+    const target = incl ? r.expectedIncl : r.book;
+    return {
+      id:'mm_'+base+'_'+i, date, type:'棚卸し', group:g, qty:counted[g], memo:'',
+      deviceName:settings.deviceName||'', timestamp:ts,
+      sessionId, cntBook:r.book, cntTarget:target, cntDiff:counted[g]-target,
+      cntInclPending:incl, cntPendShip:r.ship, cntPendRet:r.ret, cntPendArr:r.arr, adopted:!!adopt
+    };
+  });
+  records.forEach(m=>{
+    st.materialStock.movements.push(m);
+    if(!st.materialStock.pendingAdds.includes(m.id)) st.materialStock.pendingAdds.push(m.id);
+  });
+  if(newSettings) st.materialStock.settings = newSettings;
+  saveLocalState();
+  closeMaterialStockCount();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList(); populateMaterialGroupSelect();
+
+  if(!settings.gasUrl){ toast('棚卸しを記録しました（ローカルのみ）'); return; }
+  showLoading(true);
+  try{
+    let failed = 0;
+    for(const m of records){
+      try{
+        const res = await gasPost({action:'saveMaterialMovement', movement:m});
+        if(res && res.ok) st.materialStock.pendingAdds = st.materialStock.pendingAdds.filter(x=>x!==m.id);
+        else failed++;
+      }catch(e){ failed++; }
+    }
+    if(newSettings){
+      try{
+        const r2 = await gasPost({action:'saveMaterialStockSettings', settings:newSettings});
+        if(!r2 || !r2.ok) toast('起点の保存に失敗しました: '+(r2?r2.error:'不明なエラー'));
+      }catch(e){ toast('起点の保存で通信エラー: '+e.message); }
+    }
+    saveLocalState();
+    renderPendingDeleteBanner();
+    toast(failed ? `${records.length}件を記録しました（${failed}件は未確定。自動で再試行します）` : `${records.length}グループの棚卸しを記録しました${newSettings?'（起点も更新）':''}`);
+  } finally { showLoading(false); }
+}
+
+// 棚卸し記録の履歴（1回の棚卸しごとにまとめて表示）と、グループ別の差の推移
+function renderMaterialCountHistory(){
+  const el = document.getElementById('materialCountHistory');
+  if(!el) return;
+  const recs = st.materialStock.movements.filter(m=>m.type==='棚卸し');
+  if(recs.length===0){
+    el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">まだ棚卸し記録はありません（「📋 棚卸しを記録」から入力できます）</p>';
+    return;
+  }
+  const groupDispMap = {};
+  getMaterialGroupList().forEach(g=>groupDispMap[g.name]=g.dispName);
+  const sessions = {};
+  recs.forEach(m=>{
+    const sid = m.sessionId || ('t_'+(m.timestamp||m.id));
+    if(!sessions[sid]) sessions[sid] = {sid, date:m.date||'', ts:m.timestamp||'', device:m.deviceName||'', incl:!!m.cntInclPending, adopted:false, items:[]};
+    sessions[sid].items.push(m);
+    if(m.adopted) sessions[sid].adopted = true;
+  });
+  const list = Object.values(sessions).sort((a,b)=>b.date.localeCompare(a.date)||b.ts.localeCompare(a.ts));
+  const fmt = d => d===0 ? '±0' : (d>0?'+':'−')+Math.abs(d);
+
+  // グループ別の差の推移（古い→新しい、直近6回）
+  const trend = {};
+  [...list].reverse().forEach(sn=>sn.items.forEach(m=>{
+    if(typeof m.cntDiff==='number') (trend[m.group] = trend[m.group]||[]).push(m.cntDiff);
+  }));
+  const trendHtml = Object.keys(trend).map(g=>
+    `<div style="font-size:12px;padding:2px 0;"><b>${esc(groupDispMap[g]||g)}</b>　${trend[g].slice(-6).map(fmt).join(' → ')}</div>`
+  ).join('');
+
+  const sessHtml = list.slice(0,10).map(sn=>{
+    const diffN = sn.items.filter(m=>m.cntDiff).length;
+    const rows = sn.items.map(m=>`<tr><td style="text-align:left;">${esc(groupDispMap[m.group]||m.group)}</td><td>${m.qty}</td><td>${m.cntTarget??'—'}</td><td style="color:${m.cntDiff?'#c0392b':'#2e7d32'};font-weight:bold;">${typeof m.cntDiff==='number'?fmt(m.cntDiff):'—'}</td></tr>`).join('');
+    return `<details style="border-bottom:1px solid #eee;padding:6px 0;">
+      <summary style="cursor:pointer;font-size:12.5px;">${esc(sn.date)}　${sn.items.length}グループ（差あり ${diffN}）${sn.adopted?' <span style="background:#cfe2ff;color:#084298;border-radius:4px;padding:0 5px;font-size:11px;">起点にした</span>':''}${sn.incl?' <span style="background:#eee;color:#555;border-radius:4px;padding:0 5px;font-size:11px;">未出荷分込み</span>':''}<span style="color:#999;font-size:11px;">　端末: ${esc(sn.device||'—')}　入力: ${toJST(sn.ts)}</span></summary>
+      <table class="msStockTable" style="margin-top:6px;"><thead><tr><th>品目グループ</th><th>実数</th><th>比べた在庫表の数</th><th>差</th></tr></thead><tbody>${rows}</tbody></table>
+      <div style="text-align:right;margin-top:4px;"><button class="btn-danger btn-sm" onclick="deleteMaterialCountSession('${esc(sn.sid)}')">この棚卸し記録を削除</button></div>
+    </details>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="background:#f7f8fb;border-radius:6px;padding:8px 10px;margin-bottom:8px;">
+      <div style="font-size:11px;color:#666;margin-bottom:2px;">差の推移（実数 − 在庫表。古い → 新しい、直近6回）</div>
+      ${trendHtml}
+    </div>
+    ${sessHtml}
+    ${list.length>10?'<div style="font-size:11px;color:#999;margin-top:4px;">（古い棚卸し記録は省略しています）</div>':''}`;
+}
+
+async function deleteMaterialCountSession(sid){
+  const ids = st.materialStock.movements
+    .filter(m=>m.type==='棚卸し' && (m.sessionId||('t_'+(m.timestamp||m.id)))===sid).map(m=>m.id);
+  if(ids.length===0) return;
+  if(!confirm(`この棚卸し記録（${ids.length}件）を削除しますか？\n入荷・返品の数字や在庫表には影響しません。「起点にした」記録の場合も、起点の設定は元に戻りません。`)) return;
+  ids.forEach(id=>{ if(!st.materialStock.pendingDeletes.includes(id)) st.materialStock.pendingDeletes.push(id); });
+  st.materialStock.movements = st.materialStock.movements.filter(m=>!ids.includes(m.id));
+  saveLocalState();
+  renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList();
+  if(!settings.gasUrl) return;
+  for(const id of ids){
+    try{
+      const res = await gasPost({action:'deleteMaterialMovement', id});
+      if(res && res.ok) st.materialStock.pendingDeletes = st.materialStock.pendingDeletes.filter(x=>x!==id);
+    }catch(e){ /* 未確定のまま残し、背景の自動再試行に任せる */ }
+  }
+  saveLocalState();
+  renderPendingDeleteBanner();
+}
+
 function populateMaterialGroupSelect(){
   const sel = document.getElementById('msMoveGroup');
   if(!sel) return;
@@ -3604,9 +3958,10 @@ async function addMaterialMovement(){
 
 function renderMaterialMovementList(){
   renderPendingDeleteBanner();
+  renderMaterialCountHistory(); // 棚卸し記録は別のカードに表示する
   const el = document.getElementById('materialMovementList');
   if(!el) return;
-  const list = [...st.materialStock.movements].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.timestamp||'').localeCompare(a.timestamp||''));
+  const list = st.materialStock.movements.filter(m=>m.type!=='棚卸し').sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.timestamp||'').localeCompare(a.timestamp||''));
   if(list.length===0){
     el.innerHTML = '<p style="color:#999;font-size:12px;padding:4px;">登録された入荷・返品はありません</p>';
     return;
@@ -3802,7 +4157,9 @@ async function confirmMaterialStockBaseline(){
     : `本日（${todayStr}）付けの入荷はまだ入力されていないため、今後入力する本日付けの入荷は在庫計算に入ります（本日の出荷・返品は起点に含まれ、計算に入りません）。`;
   if(!confirm(`現在の在庫表の数字（${todayStr}時点）を、新しい起点在庫として確定します。\n\n※ 実数を数えた値ではなく、在庫表の数字をそのまま起点にします。実数で入れ直す場合は「⚙️ 対象グループ・起点在庫の設定」から入力してください。\n\n${timingNote}\n入荷・返品の履歴はそのまま残ります（削除・アーカイブはされません）。\n\n実行しますか？`)) return;
 
-  const rows = computeMaterialStock();
+  // 確定日（todayStr）までの記録だけを起点にする。出荷日・日付が確定日より後の記録（前日に作った納品書など）は、
+  // 起点には含めず、これまでどおり日付が来た時点で計算に入れる（含めると二重に引かれてしまう）
+  const rows = computeMaterialStock(todayStr);
   const newBaseline = {};
   rows.forEach(r=>{ newBaseline[r.group] = r.qty; });
   const newSettings = {
@@ -3835,7 +4192,8 @@ async function cleanupOldMaterialMovements(){
   cutoff.setDate(cutoff.getDate() - MATERIAL_MOVEMENT_RETENTION_DAYS);
   const cutoffStr = cutoff.toISOString().slice(0,10);
 
-  const targetCount = st.materialStock.movements.filter(m=>m.date && m.date<=cutoffStr).length;
+  // 棚卸し記録（type:'棚卸し'）は、差の推移を見るために残す（アーカイブしない。GAS側も同じ扱い）
+  const targetCount = st.materialStock.movements.filter(m=>m.date && m.date<=cutoffStr && m.type!=='棚卸し').length;
   if(targetCount===0){ toast(`${cutoffStr}以前の履歴はありません`); return; }
   if(!confirm(`${cutoffStr}（直近${MATERIAL_MOVEMENT_RETENTION_DAYS}日より前）の入荷・返品履歴 ${targetCount}件をアーカイブへ退避します。\n直近${MATERIAL_MOVEMENT_RETENTION_DAYS}日分の履歴は残ります。在庫の計算結果には影響しません。\n\n実行しますか？`)) return;
 
@@ -3843,7 +4201,7 @@ async function cleanupOldMaterialMovements(){
   try{
     const res = await gasPost({action:'archiveMaterialMovements', cutoffDate: cutoffStr});
     if(res && res.ok){
-      st.materialStock.movements = st.materialStock.movements.filter(m=>!(m.date && m.date<=cutoffStr));
+      st.materialStock.movements = st.materialStock.movements.filter(m=>!(m.date && m.date<=cutoffStr && m.type!=='棚卸し'));
       saveLocalState();
       renderMaterialStockTable(); renderMaterialArrivalGapList(); renderMaterialMovementList();
       toast(`${res.archivedCount||0}件をアーカイブしました`);
